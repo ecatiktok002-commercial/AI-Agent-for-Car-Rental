@@ -164,12 +164,15 @@ export default function TicketsPage() {
       );
       
       setTickets(processedTickets);
-      if (processedTickets.length > 0 && !selectedTicketId) {
-        setSelectedTicketId(processedTickets[0].id);
-      }
+      setSelectedTicketId(prev => {
+        if (!prev && processedTickets.length > 0) {
+          return processedTickets[0].id;
+        }
+        return prev;
+      });
     }
     setLoading(false);
-  }, [ticketFilter, agent, selectedTicketId]);
+  }, [ticketFilter, agent]);
 
   useEffect(() => {
     fetchTickets();
@@ -205,10 +208,13 @@ export default function TicketsPage() {
         fetchTickets();
 
         // Mark as new if not selected
-        if (newMessage.ticket_id !== selectedTicketId) {
-          setNewMessages(prev => ({ ...prev, [newMessage.ticket_id]: true }));
-          playNotificationSound();
-        }
+        setSelectedTicketId(currentSelectedId => {
+          if (newMessage.ticket_id !== currentSelectedId) {
+            setNewMessages(prev => ({ ...prev, [newMessage.ticket_id]: true }));
+            playNotificationSound();
+          }
+          return currentSelectedId;
+        });
       })
       .subscribe();
 
@@ -216,7 +222,7 @@ export default function TicketsPage() {
       supabase.removeChannel(ticketSubscription);
       supabase.removeChannel(allMessagesSubscription);
     };
-  }, [agent, fetchTickets, selectedTicketId]);
+  }, [agent, fetchTickets]);
 
   // Clear new message badge when ticket is selected
   useEffect(() => {
@@ -266,8 +272,19 @@ export default function TicketsPage() {
         }
 
         setMessages(prev => {
-          // Prevent duplicates
+          // Prevent duplicates by ID
           if (prev.some(m => m.id === newMessage.id)) return prev;
+          
+          // Replace optimistic messages
+          if (newMessage.sender_type === 'agent') {
+            const tempIndex = prev.findIndex(m => m.id.startsWith('temp-') && m.message_text === newMessage.message_text);
+            if (tempIndex !== -1) {
+              const next = [...prev];
+              next[tempIndex] = newMessage;
+              return next;
+            }
+          }
+          
           return [...prev, newMessage];
         });
       })
@@ -308,18 +325,40 @@ export default function TicketsPage() {
         }
       });
 
-      if (error) {
-        console.error('Supabase Invoke Error:', error);
-        let errorMessage = error.message || 'Unknown error';
+      if (error || (data && data.success === false)) {
+        console.error('Supabase Invoke Error:', error || data?.error);
+        let errorMessage = error?.message || data?.error || 'Unknown error';
         
         if (error instanceof Error) {
             errorMessage = error.message;
         }
 
-        setToast({ message: 'Failed to send message: ' + errorMessage, type: 'error' });
-        // Remove optimistic message on error
-        setMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
-        setMessageText(text); 
+        // Fallback for preview/testing: insert into database directly if edge function fails
+        console.log('Falling back to direct database insert for preview...');
+        try {
+          const { error: dbError } = await supabase.from('messages').insert({
+            ticket_id: selectedTicketId,
+            sender_type: 'agent',
+            message_text: text
+          });
+          
+          if (dbError) throw dbError;
+          
+          await supabase.from('tickets').update({
+            last_message: text,
+            status: agent.role === 'admin' ? 'assigned' : undefined
+          }).eq('id', selectedTicketId);
+
+          setToast({ message: 'Message saved locally (WhatsApp delivery failed)', type: 'warning' });
+          fetchMessages();
+          fetchTickets();
+        } catch (fallbackError) {
+          console.error('Fallback insert failed:', fallbackError);
+          setToast({ message: 'Failed to send message: ' + errorMessage, type: 'error' });
+          // Remove optimistic message on error
+          setMessages(prev => prev.filter(m => m.id !== optimisticMessage.id));
+          setMessageText(text); 
+        }
       } else {
         console.log('Message sent successfully!', data);
         // The real-time subscription will replace the optimistic message with the real one
@@ -354,13 +393,11 @@ export default function TicketsPage() {
 
     setIsTakingOver(true);
     try {
-      // Call Edge Function for take-over action (logs system message)
-      await supabase.functions.invoke('whatsapp-agent-core', {
-        body: {
-          action: 'take-over',
-          ticket_id: selectedTicketId,
-          agent_id: agent.id
-        }
+      // Insert system message for take-over
+      await supabase.from('messages').insert({
+        ticket_id: selectedTicketId,
+        sender_type: 'system',
+        message_text: `Agent ${agent.name} has taken over the conversation.`
       });
 
       // Update local state status
@@ -374,7 +411,9 @@ export default function TicketsPage() {
         .eq('id', selectedTicketId);
       
       setToast({ message: 'You have taken over the chat', type: 'success' });
+      fetchTickets();
     } catch (error) {
+      console.error('Error taking over chat:', error);
       setToast({ message: 'Failed to take over chat', type: 'error' });
     } finally {
       setIsTakingOver(false);
@@ -385,19 +424,18 @@ export default function TicketsPage() {
     if (!selectedTicketId) return;
 
     try {
-      const { error } = await supabase.functions.invoke('whatsapp-agent-core', {
-        body: {
-          action: 'assign-agent',
-          ticket_id: selectedTicketId,
-          agent_id: targetAgentId
-        }
-      });
+      const { error } = await supabase
+        .from('tickets')
+        .update({ assigned_agent_id: targetAgentId })
+        .eq('id', selectedTicketId);
 
       if (error) throw error;
       
       const targetAgent = agents.find(a => a.id === targetAgentId);
       setToast({ message: `Ticket assigned to ${targetAgent?.name || 'agent'}`, type: 'success' });
+      fetchTickets();
     } catch (error) {
+      console.error('Error assigning agent:', error);
       setToast({ message: 'Failed to assign agent', type: 'error' });
     }
   };
@@ -407,19 +445,20 @@ export default function TicketsPage() {
 
     setIsDeleting(true);
     try {
-      const { error } = await supabase.functions.invoke('whatsapp-agent-core', {
-        body: {
-          action: 'delete-ticket',
-          ticket_id: selectedTicketId
-        }
-      });
+      // Soft delete the ticket to hide it from the active list
+      const { error } = await supabase
+        .from('tickets')
+        .update({ is_deleted: true })
+        .eq('id', selectedTicketId);
 
       if (error) throw error;
 
       setToast({ message: 'Conversation cleared', type: 'success' });
       setSelectedTicketId(null);
       setDeleteMode(null);
+      fetchTickets();
     } catch (error) {
+      console.error('Error clearing conversation:', error);
       setToast({ message: 'Failed to clear conversation', type: 'error' });
     } finally {
       setIsDeleting(false);
@@ -427,24 +466,39 @@ export default function TicketsPage() {
   };
 
   const handleDeleteChat = async () => {
-    if (!selectedTicket?.customer_id) return;
+    if (!selectedTicket?.customer_id || !selectedTicketId) return;
     
     setIsDeleting(true);
     try {
-      const { error } = await supabase.functions.invoke('whatsapp-agent-core', {
-        body: {
-          action: 'delete-customer',
-          customer_id: selectedTicket.customer_id
-        }
-      });
+      // 1. Delete all messages associated with this ticket
+      const { error: messagesError } = await supabase
+        .from('messages')
+        .delete()
+        .eq('ticket_id', selectedTicketId);
+        
+      if (messagesError) throw messagesError;
 
-      if (error) throw error;
+      // 2. Delete the ticket itself
+      const { error: ticketError } = await supabase
+        .from('tickets')
+        .delete()
+        .eq('id', selectedTicketId);
+
+      if (ticketError) throw ticketError;
+
+      // 3. Attempt to delete the customer (this might fail if they have other tickets, which is fine)
+      await supabase
+        .from('customers')
+        .delete()
+        .eq('id', selectedTicket.customer_id);
 
       setToast({ message: 'Chat and customer record deleted', type: 'success' });
       setSelectedTicketId(null);
       setDeleteMode(null);
       setShowCustomerMenu(false);
+      fetchTickets();
     } catch (error) {
+      console.error('Error deleting chat:', error);
       setToast({ message: 'Failed to delete chat', type: 'error' });
     } finally {
       setIsDeleting(false);
@@ -454,19 +508,20 @@ export default function TicketsPage() {
   const handleUpdateCustomerName = async () => {
     if (!selectedTicket?.customer_id || !editCustomerName.trim()) return;
 
-    const { error } = await supabase.functions.invoke('whatsapp-agent-core', {
-      body: {
-        action: 'update-customer',
-        customer_id: selectedTicket.customer_id,
-        name: editCustomerName.trim()
-      }
-    });
+    try {
+      const { error } = await supabase
+        .from('customers')
+        .update({ name: editCustomerName.trim() })
+        .eq('id', selectedTicket.customer_id);
 
-    if (error) {
-      alert('Error updating customer: ' + error.message);
-    } else {
+      if (error) throw error;
+
       setIsEditingCustomer(false);
       setShowCustomerMenu(false);
+      fetchTickets();
+    } catch (error: any) {
+      console.error('Error updating customer name:', error);
+      alert('Error updating customer: ' + error.message);
     }
   };
 

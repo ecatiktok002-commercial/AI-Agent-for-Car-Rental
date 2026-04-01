@@ -1,5 +1,6 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
+import { GoogleGenAI } from "npm:@google/genai";
 
 // Initialize environment variables
 const META_ACCESS_TOKEN = Deno.env.get("META_ACCESS_TOKEN");
@@ -392,11 +393,16 @@ serve(async (req) => {
       if (body.action === "test-persona") {
         const { message, personality_instructions, agent_name } = body;
         
-        const response = await generateAIResponse(message, "Test Customer", personality_instructions, agent_name);
-        
-        return new Response(JSON.stringify({ success: true, response }), {
-          headers: { ...corsHeaders, "Content-Type": "application/json" },
-        });
+        try {
+          const response = await generateAIResponse(message, "Test Customer", personality_instructions, agent_name);
+          return new Response(JSON.stringify({ success: true, response }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        } catch (error: any) {
+          return new Response(JSON.stringify({ success: false, error: error.message, stack: error.stack }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
       }
 
       // ------------------------------------------
@@ -696,7 +702,12 @@ serve(async (req) => {
 
     } catch (err: any) {
       console.error("❌ Error:", err.message);
-      return new Response(JSON.stringify({ error: err.message }), { status: 500, headers: corsHeaders });
+      // Return 200 with success: false so the client can read the actual error message
+      // instead of getting a generic "Failed to send a request" error from Supabase client
+      return new Response(JSON.stringify({ success: false, error: err.message }), { 
+        status: 200, 
+        headers: { ...corsHeaders, "Content-Type": "application/json" } 
+      });
     }
   }
 
@@ -724,7 +735,8 @@ async function sendWhatsAppMessage(to: string, text: string) {
 
 // Helper: Generate AI Response using Gemini
 async function generateAIResponse(userInput: string, customerName: string, customPersona?: string, agentName?: string, history: any[] = [], referenceSnippets?: string) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key=${GEMINI_API_KEY}`;
+  // Initialize GoogleGenAI
+  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY || '' });
   
   // 1. Fetch Company Knowledge Base Facts (RAG)
   const { data: facts } = await supabase
@@ -836,48 +848,31 @@ ${globalPrompt}`;
     contents.push({ role: 'user', parts: [{ text: "Hello" }] });
   }
 
-  const payload = {
-    systemInstruction: {
-      parts: [{ text: basePrompt }]
-    },
-    contents: contents,
-    generationConfig: {
-      temperature: 0.7,
-      topK: 40,
-      topP: 0.95,
-      maxOutputTokens: 1024,
-    }
-  };
-
   // Add a final instruction to the basePrompt to ensure completion
   const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.`;
 
-  payload.systemInstruction.parts[0].text = finalBasePrompt;
-
   try {
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
+    if (!GEMINI_API_KEY) {
+      console.error("GEMINI_API_KEY is missing!");
+      throw new Error("GEMINI_API_KEY is missing");
+    }
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3-flash-preview",
+      contents: contents,
+      config: {
+        systemInstruction: finalBasePrompt,
+        temperature: 0.7,
+        topK: 40,
+        topP: 0.95,
+      }
     });
 
-    const data = await response.json();
-    const finishReason = data.candidates?.[0]?.finishReason;
-    console.log(`🤖 Gemini Finish Reason: ${finishReason}`);
+    let aiResponseText = response.text || '';
     
-    if (finishReason === 'MAX_TOKENS') {
-      console.warn("⚠️ AI response was truncated due to MAX_TOKENS limit.");
-    }
-    
-    if (!response.ok) {
-      console.error("Gemini API Error Response:", JSON.stringify(data));
-      return "Maaf ya, sistem saya tengah sibuk sikit sekarang. Kejap saya pass pada agent kami untuk bantu you... [NEEDS_AGENT]";
-    }
-
-    let aiResponseText = data.candidates?.[0]?.content?.parts?.map((p: any) => p.text).join('') || '';
     if (!aiResponseText) {
-       console.error("Gemini API returned no text. Full response:", JSON.stringify(data));
-       return "Maaf ya, sistem saya tengah sibuk sikit sekarang. Kejap saya pass pada agent kami untuk bantu you... [NEEDS_AGENT]";
+       console.error("Gemini API returned no text.");
+       return "ERROR: Gemini API returned no text.";
     }
     
     // Post-processing: Remove name prefix if present (e.g., "Biha: Hello", "**Biha:** Hello" -> "Hello")
@@ -890,6 +885,6 @@ ${globalPrompt}`;
     return aiResponseText;
   } catch (error: any) {
     console.error("Gemini Fetch Error:", error);
-    return "Maaf ya, sistem saya tengah sibuk sikit sekarang. Kejap saya pass pada agent kami untuk bantu you... [NEEDS_AGENT]";
+    return `[AI ERROR]: ${error.message || JSON.stringify(error)}. Please check your GEMINI_API_KEY in Supabase secrets.`;
   }
 }
