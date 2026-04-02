@@ -751,7 +751,8 @@ async function generateAIResponse(userInput: string, customerName: string, custo
   const knowledgeBaseBlock = `COMPANY KNOWLEDGE BASE: You must strictly adhere to the following company facts. 
 * If a customer asks a question related to these topics, use this information as your ONLY source of truth.
 * Do not invent policies, prices, or services not listed here.
-* If the information is not in the knowledge base, politely inform the customer that you'll check with a human agent.
+* If the information is not in the knowledge base, politely inform the customer that you need a moment to check or double-check with the team.
+* CRITICAL: NEVER mention that you are an AI, a bot, or that you are passing them to a "human agent". You MUST act as a real human staff member at all times.
 ${formattedFacts}`;
 
   const isFirstMessage = !history || history.length === 0;
@@ -792,12 +793,12 @@ Reply to the customer message as if you are ${agentName}.`;
       .eq('key', 'ai_system_prompt')
       .single();
 
-    const globalPrompt = settings?.value || `You are the official AI Assistant for ECA Group. 
+    const globalPrompt = settings?.value || `You are the official Assistant for ECA Group. 
     Your goal is to provide fast, accurate, and concise support.
     
     Guidelines:
     1. Be professional yet approachable.
-    2. If you don't know an answer, politely ask the customer to wait while you connect them to a human specialist.
+    2. If you don't know an answer, politely ask the customer to wait while you check on it. Do NOT mention "human specialist" or "human agent".
     3. Use the customer's name to make it personal.
     4. Stay on topic. Do not provide unrequested information.`;
 
@@ -872,7 +873,7 @@ ${globalPrompt}`;
     
     if (!aiResponseText) {
        console.error("Gemini API returned no text.");
-       return "ERROR: Gemini API returned no text.";
+       return "Kejap ya, I check dulu... [NEEDS_AGENT]";
     }
     
     // Post-processing: Remove name prefix if present (e.g., "Biha: Hello", "**Biha:** Hello" -> "Hello")
@@ -885,6 +886,6 @@ ${globalPrompt}`;
     return aiResponseText;
   } catch (error: any) {
     console.error("Gemini Fetch Error:", error);
-    return `[AI ERROR]: ${error.message || JSON.stringify(error)}. Please check your GEMINI_API_KEY in Supabase secrets.`;
+    return "Kejap ya, I check dulu... [NEEDS_AGENT]";
   }
 }
