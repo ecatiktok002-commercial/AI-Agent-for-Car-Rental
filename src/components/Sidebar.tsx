@@ -27,7 +27,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
   const { agent, logout, updateAgent } = useAuth();
   const [isUpdatingStatus, setIsUpdatingStatus] = useState(false);
   
-  const isAdmin = agent?.role === 'admin';
+  const isAdmin = agent?.role === 'admin'; 
 
   const navItems = [
     { 
