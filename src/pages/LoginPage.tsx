@@ -58,7 +58,7 @@ export default function LoginPage() {
           .select('id, name, username, password, role, status, is_approved, tone_style, greeting_template, signature, emoji_level, response_style_rules, created_at')
           .eq('username', username.trim())
           .eq('password', password)
-          .single();
+          .maybeSingle();
 
         const { data, error: fetchError } = await Promise.race([authPromise, timeoutPromise]) as any;
         console.timeEnd('auth_request');
