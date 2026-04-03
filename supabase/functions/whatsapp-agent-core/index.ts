@@ -881,10 +881,6 @@ Reply to the customer message as if you are ${agentName}.`;
   const getAllCarsDeclaration: FunctionDeclaration = {
     name: "get_all_cars",
     description: "Get a list of all car models available for rent in the company fleet.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {},
-    },
   };
 
   try {
@@ -894,7 +890,7 @@ Reply to the customer message as if you are ${agentName}.`;
     }
 
     let response = await ai.models.generateContent({
-      model: "gemini-3.1-pro-preview",
+      model: "gemini-3.1-flash-preview",
       contents: contents,
       config: {
         systemInstruction: finalBasePrompt,
@@ -1005,7 +1001,7 @@ Reply to the customer message as if you are ${agentName}.`;
 
         // Call Gemini again with the tool responses
         response = await ai.models.generateContent({
-          model: "gemini-3.1-pro-preview",
+          model: "gemini-3.1-flash-preview",
           contents: contents,
           config: {
             systemInstruction: finalBasePrompt,
@@ -1020,11 +1016,17 @@ Reply to the customer message as if you are ${agentName}.`;
       }
     }
 
-    let aiResponseText = response.text || '';
+    let aiResponseText = '';
+    try {
+      aiResponseText = response.text || '';
+    } catch (e: any) {
+      console.error("Error getting response.text:", e);
+      return `Kejap ya, I check dulu... [NEEDS_AGENT] (Text Error: ${e.message})`;
+    }
     
     if (!aiResponseText) {
        console.error("Gemini API returned no text.");
-       return "Kejap ya, I check dulu... [NEEDS_AGENT]";
+       return "Kejap ya, I check dulu... [NEEDS_AGENT] (No text returned)";
     }
     
     // Post-processing: Remove name prefix if present (e.g., "Biha: Hello", "**Biha:** Hello" -> "Hello")
@@ -1037,6 +1039,6 @@ Reply to the customer message as if you are ${agentName}.`;
     return aiResponseText;
   } catch (error: any) {
     console.error("Gemini Fetch Error:", error);
-    return "Kejap ya, I check dulu... [NEEDS_AGENT]";
+    return `Kejap ya, I check dulu... [NEEDS_AGENT] (Fetch Error: ${error.message})`;
   }
 }
