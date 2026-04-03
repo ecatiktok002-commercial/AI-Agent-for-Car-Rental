@@ -905,91 +905,105 @@ Reply to the customer message as if you are ${agentName}.`;
       }
     });
 
-    if (response.functionCalls && response.functionCalls.length > 0) {
-      const call = response.functionCalls[0];
-      let toolResult: any = {};
-      let toolCalled = false;
+    let loopCount = 0;
+    while (response.functionCalls && response.functionCalls.length > 0 && loopCount < 3) {
+      loopCount++;
+      
+      // Append the model's response (which contains the function calls) to contents
+      if (response.candidates && response.candidates[0].content) {
+        contents.push(response.candidates[0].content);
+      }
 
-      if (call.name === "get_car_availability") {
-        toolCalled = true;
-        const args = call.args as any;
-        toolResult = { available: false };
-        try {
-          const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
-          if (externalDbUrl) {
-            const sql = postgres(externalDbUrl);
-            const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
-            
-            const result = await sql`
-              SELECT EXISTS (
-                SELECT 1 
-                FROM bookings b
-                JOIN cars c ON b.car_id = c.id
-                WHERE c.name ILIKE ${'%' + args.car_model + '%'}
-                  AND b.subscriber_id = ${subscriberId}
-                  AND (b.start_date::date + b.pickup_time::time) < (${args.date}::date + INTERVAL '1 day')
-                  AND (b.start_date::date + b.pickup_time::time + (b.duration * INTERVAL '1 day')) > ${args.date}::date
-              ) as is_booked
-            `;
-            
-            if (result && result.length > 0) {
-              toolResult = { available: !result[0].is_booked };
+      const functionResponseParts = [];
+      let anyToolCalled = false;
+
+      for (const call of response.functionCalls) {
+        let toolResult: any = {};
+        let toolCalled = false;
+
+        if (call.name === "get_car_availability") {
+          toolCalled = true;
+          const args = call.args as any;
+          toolResult = { available: false };
+          try {
+            const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
+            if (externalDbUrl) {
+              const sql = postgres(externalDbUrl);
+              const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
+              
+              const result = await sql`
+                SELECT EXISTS (
+                  SELECT 1 
+                  FROM bookings b
+                  JOIN cars c ON b.car_id = c.id
+                  WHERE c.name ILIKE ${'%' + args.car_model + '%'}
+                    AND b.subscriber_id = ${subscriberId}
+                    AND (b.start_date::date + b.pickup_time::time) < (${args.date}::date + INTERVAL '1 day')
+                    AND (b.start_date::date + b.pickup_time::time + (b.duration * INTERVAL '1 day')) > ${args.date}::date
+                ) as is_booked
+              `;
+              
+              if (result && result.length > 0) {
+                toolResult = { available: !result[0].is_booked };
+              } else {
+                toolResult = { available: true };
+              }
+              await sql.end();
             } else {
-              toolResult = { available: true };
+              console.warn("EXTERNAL_DB_URL is not set, returning mock data");
+              toolResult = { available: Math.random() > 0.5 };
             }
-            await sql.end();
-          } else {
-            console.warn("EXTERNAL_DB_URL is not set, returning mock data");
-            toolResult = { available: Math.random() > 0.5 };
+          } catch (e) {
+            console.error("External DB error:", e);
+            toolResult = { error: "Database connection failed or invalid date format" };
           }
-        } catch (e) {
-          console.error("External DB error:", e);
-          toolResult = { error: "Database connection failed or invalid date format" };
+        } else if (call.name === "get_all_cars") {
+          toolCalled = true;
+          try {
+            const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
+            if (externalDbUrl) {
+              const sql = postgres(externalDbUrl);
+              const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
+              
+              const result = await sql`
+                SELECT name FROM cars WHERE subscriber_id = ${subscriberId}
+              `;
+              
+              if (result && result.length > 0) {
+                toolResult = { cars: result.map((r: any) => r.name) };
+              } else {
+                toolResult = { cars: [] };
+              }
+              await sql.end();
+            } else {
+              console.warn("EXTERNAL_DB_URL is not set, returning mock data");
+              toolResult = { cars: ["Axia", "Bezza", "Saga", "Myvi"] };
+            }
+          } catch (e) {
+            console.error("External DB error:", e);
+            toolResult = { error: "Database connection failed", cars: ["Axia", "Bezza", "Saga"] };
+          }
         }
-      } else if (call.name === "get_all_cars") {
-        toolCalled = true;
-        try {
-          const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
-          if (externalDbUrl) {
-            const sql = postgres(externalDbUrl);
-            const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
-            
-            const result = await sql`
-              SELECT name FROM cars WHERE subscriber_id = ${subscriberId}
-            `;
-            
-            if (result && result.length > 0) {
-              toolResult = { cars: result.map((r: any) => r.name) };
-            } else {
-              toolResult = { cars: [] };
+
+        if (toolCalled) {
+          anyToolCalled = true;
+          functionResponseParts.push({
+            functionResponse: {
+              name: call.name,
+              response: toolResult,
+              id: call.id
             }
-            await sql.end();
-          } else {
-            console.warn("EXTERNAL_DB_URL is not set, returning mock data");
-            toolResult = { cars: ["Axia", "Bezza", "Saga", "Myvi"] };
-          }
-        } catch (e) {
-          console.error("External DB error:", e);
-          toolResult = { error: "Database connection failed", cars: ["Axia", "Bezza", "Saga"] };
+          });
         }
       }
 
-      if (toolCalled) {
-        // Append the tool call and response to contents
-        if (response.candidates && response.candidates[0].content) {
-          contents.push(response.candidates[0].content);
-        }
+      if (anyToolCalled) {
         contents.push({
           role: "user",
-          parts: [{
-            functionResponse: {
-              name: call.name,
-              response: toolResult
-            }
-          }]
+          parts: functionResponseParts
         });
 
-        // Call Gemini again with the tool response
+        // Call Gemini again with the tool responses
         response = await ai.models.generateContent({
           model: "gemini-3.1-pro-preview",
           contents: contents,
@@ -1001,6 +1015,8 @@ Reply to the customer message as if you are ${agentName}.`;
             tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration] }],
           }
         });
+      } else {
+        break;
       }
     }
 
