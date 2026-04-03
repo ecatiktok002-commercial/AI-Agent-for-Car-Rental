@@ -964,25 +964,26 @@ Reply to the customer message as if you are ${agentName}.`;
             const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
             if (externalDbUrl) {
               const sql = postgres(externalDbUrl);
-              const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
+              const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'; // Make sure this matches your actual subscriber ID
               
-              // FIXED LOGIC: Find at least ONE car that is NOT booked for this date
+              // SCHEMA FIX: Using pickup_datetime and checking statuses
               const result = await sql`
                 SELECT c.id 
                 FROM cars c
                 WHERE c.name ILIKE ${'%' + args.car_model + '%'}
                 AND c.subscriber_id = ${subscriberId}
+                AND c.status = 'active'
                 AND c.id NOT IN (
                   SELECT b.car_id 
                   FROM bookings b
                   WHERE b.car_id = c.id
-                    AND (b.start_date::date + b.pickup_time::time) < (${args.date}::date + INTERVAL '1 day')
-                    AND (b.start_date::date + b.pickup_time::time + (b.duration * INTERVAL '1 day')) > ${args.date}::date
+                    AND b.status = 'active'
+                    AND b.pickup_datetime < (cast(${args.date} as date) + INTERVAL '1 day')
+                    AND (b.pickup_datetime + (b.duration * INTERVAL '1 day')) > cast(${args.date} as date)
                 )
                 LIMIT 1
               `;
               
-              // If we got a row back, it means there is at least 1 car free!
               if (result && result.length > 0) {
                 toolResult = { available: true };
               } else {
@@ -994,7 +995,7 @@ Reply to the customer message as if you are ${agentName}.`;
             }
           } catch (e) {
             console.error("External DB error:", e);
-            toolResult = { error: "Database connection failed or invalid date format" };
+            toolResult = { error: "Database connection failed" };
           }
         } else if (call.name === "get_all_cars") {
           toolCalled = true;
@@ -1004,11 +1005,12 @@ Reply to the customer message as if you are ${agentName}.`;
               const sql = postgres(externalDbUrl);
               const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
               
-              // FIXED LOGIC: Get DISTINCT names and filter by your subscriber ID
+              // SCHEMA FIX: Only get active cars
               const result = await sql`
                 SELECT DISTINCT name 
                 FROM cars
                 WHERE subscriber_id = ${subscriberId}
+                AND status = 'active'
               `;
               
               if (result && result.length > 0) {
