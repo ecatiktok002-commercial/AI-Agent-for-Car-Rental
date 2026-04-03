@@ -432,6 +432,45 @@ serve(async (req) => {
       }
 
       // ------------------------------------------
+      // ROUTE M: Test DB Bridge (action: "test-bridge")
+      // ------------------------------------------
+      if (body.action === "test-bridge") {
+        try {
+          const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
+          if (!externalDbUrl) {
+            return new Response(JSON.stringify({ 
+              success: false, 
+              error: "EXTERNAL_DB_URL is not set in Edge Function secrets." 
+            }), {
+              headers: { ...corsHeaders, "Content-Type": "application/json" },
+            });
+          }
+          
+          // Attempt to connect to the external database
+          const sql = postgres(externalDbUrl);
+          const result = await sql`SELECT NOW() as current_time, current_user as connected_user`;
+          await sql.end();
+          
+          return new Response(JSON.stringify({ 
+            success: true, 
+            message: "Bridge connection successful!", 
+            data: result 
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        } catch (error: any) {
+          console.error("❌ Bridge Connection Error:", error);
+          return new Response(JSON.stringify({ 
+            success: false, 
+            error: "Bridge connection failed", 
+            details: error.message 
+          }), {
+            headers: { ...corsHeaders, "Content-Type": "application/json" },
+          });
+        }
+      }
+
+      // ------------------------------------------
       // ROUTE B: Inbound Customer Webhook
       // ------------------------------------------
       if (body.object === "whatsapp_business_account") {

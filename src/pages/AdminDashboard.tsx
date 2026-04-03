@@ -6,7 +6,8 @@ import {
   CheckCircle2,
   ArrowUpRight,
   MoreHorizontal,
-  BookOpen
+  BookOpen,
+  Database
 } from 'lucide-react';
 import { Badge } from '../components/Badge';
 import { cn } from '../utils';
@@ -26,6 +27,30 @@ export default function AdminDashboard() {
   const [recentTickets, setRecentTickets] = useState<Ticket[]>([]);
   const [ticketFilter, setTicketFilter] = useState<'mine' | 'all'>('mine');
   const [loading, setLoading] = useState(true);
+  const [isTestingBridge, setIsTestingBridge] = useState(false);
+
+  const checkDatabaseBridge = async () => {
+    setIsTestingBridge(true);
+    try {
+      const { data, error } = await supabase.functions.invoke('whatsapp-agent-core', {
+        body: { action: 'test-bridge' }
+      });
+
+      if (error) throw error;
+
+      if (data && data.success) {
+        alert(`✅ Bridge Connected Successfully!\nUser: ${data.data[0].connected_user}\nTime: ${data.data[0].current_time}`);
+        console.log("Bridge Data:", data);
+      } else {
+        alert(`❌ Bridge Failed: ${data?.error || 'Unknown error'}\nDetails: ${data?.details || ''}`);
+      }
+    } catch (err: any) {
+      alert(`❌ Error testing bridge: ${err.message}`);
+      console.error(err);
+    } finally {
+      setIsTestingBridge(false);
+    }
+  };
 
   useEffect(() => {
     const fetchDashboardData = async () => {
@@ -107,9 +132,21 @@ export default function AdminDashboard() {
 
   return (
     <div className="p-8 space-y-8 max-w-7xl mx-auto">
-      <div>
-        <h1 className="text-2xl font-bold text-slate-900">Dashboard Overview</h1>
-        <p className="text-slate-500">Welcome back, here's what's happening today.</p>
+      <div className="flex justify-between items-start">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">Dashboard Overview</h1>
+          <p className="text-slate-500">Welcome back, here's what's happening today.</p>
+        </div>
+        <button
+          onClick={checkDatabaseBridge}
+          disabled={isTestingBridge}
+          className="flex items-center gap-2 px-4 py-2 bg-slate-900 text-white rounded-xl hover:bg-slate-800 transition-colors disabled:opacity-50"
+        >
+          <Database className="w-4 h-4" />
+          <span className="text-sm font-medium">
+            {isTestingBridge ? 'Testing Bridge...' : 'Test DB Bridge'}
+          </span>
+        </button>
       </div>
 
       {/* Stats Grid */}
