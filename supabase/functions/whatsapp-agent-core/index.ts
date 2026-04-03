@@ -960,33 +960,37 @@ Reply to the customer message as if you are ${agentName}.`;
         if (call.name === "get_car_availability") {
           toolCalled = true;
           const args = call.args as any;
-          toolResult = { available: false };
           try {
             const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
             if (externalDbUrl) {
               const sql = postgres(externalDbUrl);
               const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
               
+              // FIXED LOGIC: Find at least ONE car that is NOT booked for this date
               const result = await sql`
-                SELECT EXISTS (
-                  SELECT 1 
+                SELECT c.id 
+                FROM cars c
+                WHERE c.name ILIKE ${'%' + args.car_model + '%'}
+                AND c.subscriber_id = ${subscriberId}
+                AND c.id NOT IN (
+                  SELECT b.car_id 
                   FROM bookings b
-                  JOIN cars c ON b.car_id = c.id
-                  WHERE c.name ILIKE ${'%' + args.car_model + '%'}
+                  WHERE b.car_id = c.id
                     AND (b.start_date::date + b.pickup_time::time) < (${args.date}::date + INTERVAL '1 day')
                     AND (b.start_date::date + b.pickup_time::time + (b.duration * INTERVAL '1 day')) > ${args.date}::date
-                ) as is_booked
+                )
+                LIMIT 1
               `;
               
+              // If we got a row back, it means there is at least 1 car free!
               if (result && result.length > 0) {
-                toolResult = { available: !result[0].is_booked };
-              } else {
                 toolResult = { available: true };
+              } else {
+                toolResult = { available: false };
               }
               await sql.end();
             } else {
-              console.warn("EXTERNAL_DB_URL is not set, returning mock data");
-              toolResult = { available: Math.random() > 0.5 };
+              toolResult = { error: "Database bridge not configured." };
             }
           } catch (e) {
             console.error("External DB error:", e);
@@ -1000,8 +1004,11 @@ Reply to the customer message as if you are ${agentName}.`;
               const sql = postgres(externalDbUrl);
               const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
               
+              // FIXED LOGIC: Get DISTINCT names and filter by your subscriber ID
               const result = await sql`
-                SELECT name FROM cars
+                SELECT DISTINCT name 
+                FROM cars
+                WHERE subscriber_id = ${subscriberId}
               `;
               
               if (result && result.length > 0) {
@@ -1011,12 +1018,11 @@ Reply to the customer message as if you are ${agentName}.`;
               }
               await sql.end();
             } else {
-              console.warn("EXTERNAL_DB_URL is not set, returning mock data");
-              toolResult = { cars: ["Axia", "Bezza", "Saga", "Myvi"] };
+              toolResult = { error: "Database bridge not configured." };
             }
           } catch (e) {
             console.error("External DB error:", e);
-            toolResult = { error: "Database connection failed", cars: ["Axia", "Bezza", "Saga"] };
+            toolResult = { error: "Database connection failed" };
           }
         }
 
