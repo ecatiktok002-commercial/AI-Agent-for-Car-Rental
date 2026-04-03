@@ -833,7 +833,7 @@ ${greetingRule}
   If get_car_availability returns available: true, you say: "Ada boss! Axia masih available untuk tarikh tu. Nak I proceed booking ke? 😊"
   If get_car_availability returns available: false, you say: "Alamak boss, Axia dah kena tapau (booked) la untuk tarikh tu. Tapi jap, I check Bezza atau Saga untuk boss nak?" (Then check the tool again for alternatives).
   If get_all_cars returns a list of cars, list them nicely to the customer.
-  If the tool fails, say: "Kejap ya boss, line sistem tengah sangkut jap. I minta kawan I (human agent) check manual jap."`;
+  If the tool fails, say: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya."`;
 
   let basePrompt = `${knowledgeBaseBlock}
 ${conversationFlowRule}
