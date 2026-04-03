@@ -1,6 +1,7 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
-import { GoogleGenAI } from "npm:@google/genai";
+import { GoogleGenAI, Type, FunctionDeclaration } from "npm:@google/genai";
+import postgres from "https://deno.land/x/postgresjs/mod.js";
 
 // Initialize environment variables
 const META_ACCESS_TOKEN = Deno.env.get("META_ACCESS_TOKEN");
@@ -769,13 +770,40 @@ ${greetingRule}
 * Never repeat greetings in the middle of a chat.
 `;
 
-  let basePrompt = "";
+  // 2. Fetch Global System Prompt from Database
+  const { data: settings } = await supabase
+    .from('system_settings')
+    .select('value')
+    .eq('key', 'ai_system_prompt')
+    .single();
+
+  const globalPrompt = settings?.value || `You are the official Assistant for ECA Group. 
+  Your goal is to provide fast, accurate, and concise support.
   
-  if (customPersona) {
-    basePrompt = `${knowledgeBaseBlock}
+  Guidelines:
+  1. Be professional yet approachable.
+  2. If you don't know an answer, politely ask the customer to wait while you check on it. Do NOT mention "human specialist" or "human agent".
+  3. Use the customer's name to make it personal.
+  4. Stay on topic. Do not provide unrequested information.
+  
+  CRITICAL RULE: You are NOT allowed to confirm car availability based on your own memory. If a customer asks "Axia ada tak?" or "Available ke esok?", you MUST use the get_car_availability tool.
+  
+  CRITICAL RULE 2: If a customer asks "kereta apa yang ada ya?" or "what cars do you have?", you MUST use the get_all_cars tool to get the list of cars. Do NOT guess the cars.
+
+  Logic Flow:
+  If get_car_availability returns available: true, you say: "Ada boss! Axia masih available untuk tarikh tu. Nak I proceed booking ke? 😊"
+  If get_car_availability returns available: false, you say: "Alamak boss, Axia dah kena tapau (booked) la untuk tarikh tu. Tapi jap, I check Bezza atau Saga untuk boss nak?" (Then check the tool again for alternatives).
+  If get_all_cars returns a list of cars, list them nicely to the customer.
+  If the tool fails, say: "Kejap ya boss, line sistem tengah sangkut jap. I minta kawan I (human agent) check manual jap."`;
+
+  let basePrompt = `${knowledgeBaseBlock}
 ${conversationFlowRule}
 
-You are the AI First-Responder for ${agentName}. 
+${globalPrompt}`;
+
+  if (customPersona) {
+    basePrompt += `\n\n--- AGENT PERSONA OVERRIDE ---\n`;
+    basePrompt += `You are the AI First-Responder for ${agentName}. 
 * You MUST reply using their exact tone, vocabulary, and style.
 * Do NOT prefix your response with your name (e.g., do not start with "${agentName}:"). 
 * Do not announce yourself as an AI. 
@@ -785,27 +813,6 @@ ${customPersona}
 
 ${referenceSnippets ? `STYLE REFERENCE (Mimic this tone/vocabulary):\n${referenceSnippets}\n` : ''}
 Reply to the customer message as if you are ${agentName}.`;
-  } else {
-    // 2. Fetch Global System Prompt from Database
-    const { data: settings } = await supabase
-      .from('system_settings')
-      .select('value')
-      .eq('key', 'ai_system_prompt')
-      .single();
-
-    const globalPrompt = settings?.value || `You are the official Assistant for ECA Group. 
-    Your goal is to provide fast, accurate, and concise support.
-    
-    Guidelines:
-    1. Be professional yet approachable.
-    2. If you don't know an answer, politely ask the customer to wait while you check on it. Do NOT mention "human specialist" or "human agent".
-    3. Use the customer's name to make it personal.
-    4. Stay on topic. Do not provide unrequested information.`;
-
-    basePrompt = `${knowledgeBaseBlock}
-${conversationFlowRule}
-
-${globalPrompt}`;
   }
 
   // Format history for Gemini contents array
@@ -852,22 +859,150 @@ ${globalPrompt}`;
   // Add a final instruction to the basePrompt to ensure completion
   const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.`;
 
+  const getCarAvailabilityDeclaration: FunctionDeclaration = {
+    name: "get_car_availability",
+    description: "Check if a specific car model is available for a given date.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        car_model: {
+          type: Type.STRING,
+          description: "The model of the car (e.g., Axia, Bezza, Saga).",
+        },
+        date: {
+          type: Type.STRING,
+          description: "The date to check availability for (e.g., 'tomorrow', '2023-10-25').",
+        },
+      },
+      required: ["car_model", "date"],
+    },
+  };
+
+  const getAllCarsDeclaration: FunctionDeclaration = {
+    name: "get_all_cars",
+    description: "Get a list of all car models available for rent in the company fleet.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {},
+    },
+  };
+
   try {
     if (!GEMINI_API_KEY) {
       console.error("GEMINI_API_KEY is missing!");
       throw new Error("GEMINI_API_KEY is missing");
     }
 
-    const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+    let response = await ai.models.generateContent({
+      model: "gemini-3.1-pro-preview",
       contents: contents,
       config: {
         systemInstruction: finalBasePrompt,
         temperature: 0.7,
         topK: 40,
         topP: 0.95,
+        tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration] }],
       }
     });
+
+    if (response.functionCalls && response.functionCalls.length > 0) {
+      const call = response.functionCalls[0];
+      let toolResult: any = {};
+      let toolCalled = false;
+
+      if (call.name === "get_car_availability") {
+        toolCalled = true;
+        const args = call.args as any;
+        toolResult = { available: false };
+        try {
+          const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
+          if (externalDbUrl) {
+            const sql = postgres(externalDbUrl);
+            const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
+            
+            const result = await sql`
+              SELECT EXISTS (
+                SELECT 1 
+                FROM bookings b
+                JOIN cars c ON b.car_id = c.id
+                WHERE c.name ILIKE ${'%' + args.car_model + '%'}
+                  AND b.subscriber_id = ${subscriberId}
+                  AND (b.start_date::date + b.pickup_time::time) < (${args.date}::date + INTERVAL '1 day')
+                  AND (b.start_date::date + b.pickup_time::time + (b.duration * INTERVAL '1 day')) > ${args.date}::date
+              ) as is_booked
+            `;
+            
+            if (result && result.length > 0) {
+              toolResult = { available: !result[0].is_booked };
+            } else {
+              toolResult = { available: true };
+            }
+            await sql.end();
+          } else {
+            console.warn("EXTERNAL_DB_URL is not set, returning mock data");
+            toolResult = { available: Math.random() > 0.5 };
+          }
+        } catch (e) {
+          console.error("External DB error:", e);
+          toolResult = { error: "Database connection failed or invalid date format" };
+        }
+      } else if (call.name === "get_all_cars") {
+        toolCalled = true;
+        try {
+          const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
+          if (externalDbUrl) {
+            const sql = postgres(externalDbUrl);
+            const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
+            
+            const result = await sql`
+              SELECT name FROM cars WHERE subscriber_id = ${subscriberId}
+            `;
+            
+            if (result && result.length > 0) {
+              toolResult = { cars: result.map((r: any) => r.name) };
+            } else {
+              toolResult = { cars: [] };
+            }
+            await sql.end();
+          } else {
+            console.warn("EXTERNAL_DB_URL is not set, returning mock data");
+            toolResult = { cars: ["Axia", "Bezza", "Saga", "Myvi"] };
+          }
+        } catch (e) {
+          console.error("External DB error:", e);
+          toolResult = { error: "Database connection failed", cars: ["Axia", "Bezza", "Saga"] };
+        }
+      }
+
+      if (toolCalled) {
+        // Append the tool call and response to contents
+        if (response.candidates && response.candidates[0].content) {
+          contents.push(response.candidates[0].content);
+        }
+        contents.push({
+          role: "user",
+          parts: [{
+            functionResponse: {
+              name: call.name,
+              response: toolResult
+            }
+          }]
+        });
+
+        // Call Gemini again with the tool response
+        response = await ai.models.generateContent({
+          model: "gemini-3.1-pro-preview",
+          contents: contents,
+          config: {
+            systemInstruction: finalBasePrompt,
+            temperature: 0.7,
+            topK: 40,
+            topP: 0.95,
+            tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration] }],
+          }
+        });
+      }
+    }
 
     let aiResponseText = response.text || '';
     
