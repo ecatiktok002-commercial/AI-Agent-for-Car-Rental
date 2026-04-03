@@ -449,33 +449,12 @@ serve(async (req) => {
           // Attempt to connect to the external database
           const sql = postgres(externalDbUrl);
           const result = await sql`SELECT NOW() as current_time, current_user as connected_user`;
-          
-          // Test the cars and bookings tables
-          let tableTestResult = "Not tested";
-          let tableTestError = null;
-          try {
-            const testQuery = await sql`
-              SELECT c.name as car_name, b.start_date 
-              FROM cars c 
-              LEFT JOIN bookings b ON c.id = b.car_id 
-              LIMIT 1
-            `;
-            tableTestResult = "Success: Can read cars and bookings tables";
-          } catch (e: any) {
-            tableTestError = e.message;
-            tableTestResult = "Failed to read tables";
-          }
-
           await sql.end();
           
           return new Response(JSON.stringify({ 
             success: true, 
             message: "Bridge connection successful!", 
-            data: result,
-            tableTest: {
-              status: tableTestResult,
-              error: tableTestError
-            }
+            data: result 
           }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
@@ -994,7 +973,6 @@ Reply to the customer message as if you are ${agentName}.`;
                   FROM bookings b
                   JOIN cars c ON b.car_id = c.id
                   WHERE c.name ILIKE ${'%' + args.car_model + '%'}
-                    AND b.subscriber_id = ${subscriberId}
                     AND (b.start_date::date + b.pickup_time::time) < (${args.date}::date + INTERVAL '1 day')
                     AND (b.start_date::date + b.pickup_time::time + (b.duration * INTERVAL '1 day')) > ${args.date}::date
                 ) as is_booked
@@ -1023,7 +1001,7 @@ Reply to the customer message as if you are ${agentName}.`;
               const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
               
               const result = await sql`
-                SELECT name FROM cars WHERE subscriber_id = ${subscriberId}
+                SELECT name FROM cars
               `;
               
               if (result && result.length > 0) {

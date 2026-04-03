@@ -39,16 +39,7 @@ export default function AdminDashboard() {
       if (error) throw error;
 
       if (data && data.success) {
-        let alertMsg = `✅ Bridge Connected Successfully!\nUser: ${data.data[0].connected_user}\nTime: ${data.data[0].current_time}`;
-        
-        if (data.tableTest) {
-          alertMsg += `\n\nTable Test: ${data.tableTest.status}`;
-          if (data.tableTest.error) {
-            alertMsg += `\nError: ${data.tableTest.error}`;
-          }
-        }
-        
-        alert(alertMsg);
+        alert(`✅ Bridge Connected Successfully!\nUser: ${data.data[0].connected_user}\nTime: ${data.data[0].current_time}`);
         console.log("Bridge Data:", data);
       } else {
         alert(`❌ Bridge Failed: ${data?.error || 'Unknown error'}\nDetails: ${data?.details || ''}`);
