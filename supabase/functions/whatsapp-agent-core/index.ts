@@ -857,7 +857,8 @@ Reply to the customer message as if you are ${agentName}.`;
   }
 
   // Add a final instruction to the basePrompt to ensure completion
-  const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.`;
+  const todayDate = new Date().toISOString().split('T')[0];
+  const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.`;
 
   const getCarAvailabilityDeclaration: FunctionDeclaration = {
     name: "get_car_availability",
@@ -871,7 +872,7 @@ Reply to the customer message as if you are ${agentName}.`;
         },
         date: {
           type: Type.STRING,
-          description: "The date to check availability for (e.g., 'tomorrow', '2023-10-25').",
+          description: "The date to check availability for. MUST be strictly in YYYY-MM-DD format. If the user says 'tomorrow', 'esok', or '4/4', you must convert it to the correct YYYY-MM-DD date based on today's date.",
         },
       },
       required: ["car_model", "date"],
@@ -1021,12 +1022,12 @@ Reply to the customer message as if you are ${agentName}.`;
       aiResponseText = response.text || '';
     } catch (e: any) {
       console.error("Error getting response.text:", e);
-      return `Kejap ya, I check dulu... [NEEDS_AGENT] (Text Error: ${e.message})`;
+      return "Kejap ya, I check dulu... [NEEDS_AGENT]";
     }
     
     if (!aiResponseText) {
        console.error("Gemini API returned no text.");
-       return "Kejap ya, I check dulu... [NEEDS_AGENT] (No text returned)";
+       return "Kejap ya, I check dulu... [NEEDS_AGENT]";
     }
     
     // Post-processing: Remove name prefix if present (e.g., "Biha: Hello", "**Biha:** Hello" -> "Hello")
@@ -1039,6 +1040,6 @@ Reply to the customer message as if you are ${agentName}.`;
     return aiResponseText;
   } catch (error: any) {
     console.error("Gemini Fetch Error:", error);
-    return `Kejap ya, I check dulu... [NEEDS_AGENT] (Fetch Error: ${error.message})`;
+    return "Kejap ya, I check dulu... [NEEDS_AGENT]";
   }
 }
