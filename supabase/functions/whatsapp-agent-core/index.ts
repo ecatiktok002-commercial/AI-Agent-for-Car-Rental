@@ -449,12 +449,33 @@ serve(async (req) => {
           // Attempt to connect to the external database
           const sql = postgres(externalDbUrl);
           const result = await sql`SELECT NOW() as current_time, current_user as connected_user`;
+          
+          // Test the cars and bookings tables
+          let tableTestResult = "Not tested";
+          let tableTestError = null;
+          try {
+            const testQuery = await sql`
+              SELECT c.name as car_name, b.start_date 
+              FROM cars c 
+              LEFT JOIN bookings b ON c.id = b.car_id 
+              LIMIT 1
+            `;
+            tableTestResult = "Success: Can read cars and bookings tables";
+          } catch (e: any) {
+            tableTestError = e.message;
+            tableTestResult = "Failed to read tables";
+          }
+
           await sql.end();
           
           return new Response(JSON.stringify({ 
             success: true, 
             message: "Bridge connection successful!", 
-            data: result 
+            data: result,
+            tableTest: {
+              status: tableTestResult,
+              error: tableTestError
+            }
           }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
