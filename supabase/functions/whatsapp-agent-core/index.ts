@@ -890,7 +890,7 @@ Reply to the customer message as if you are ${agentName}.`;
     }
 
     let response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-preview",
+      model: "gemini-3-flash-preview",
       contents: contents,
       config: {
         systemInstruction: finalBasePrompt,
@@ -1001,7 +1001,7 @@ Reply to the customer message as if you are ${agentName}.`;
 
         // Call Gemini again with the tool responses
         response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-preview",
+          model: "gemini-3-flash-preview",
           contents: contents,
           config: {
             systemInstruction: finalBasePrompt,
