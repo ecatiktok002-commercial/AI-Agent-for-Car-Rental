@@ -6,6 +6,7 @@ import {
   Route, 
   BookOpen,
   BarChart3, 
+  FileText,
   LogOut,
   UserCircle,
   Loader2,
@@ -52,6 +53,12 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
       label: 'Knowledge Base', 
       icon: BookOpen, 
       path: '/admin/knowledge-base',
+      show: isAdmin 
+    },
+    { 
+      label: 'Bookings', 
+      icon: FileText, 
+      path: '/admin/bookings',
       show: isAdmin 
     },
     { 

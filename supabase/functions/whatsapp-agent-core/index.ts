@@ -722,9 +722,18 @@ serve(async (req) => {
                 console.log(`🤖 Raw AI Response: ${aiResponse}`);
                 
                 // Clean the message before it hits WhatsApp
-                const finalMessage = aiResponse.replace(/\[NEEDS_AGENT\]/g, '').trim();
+                let finalMessage = aiResponse.replace(/\[NEEDS_AGENT\]/g, '').trim();
+                const needsQR = finalMessage.includes('[SEND_QR]');
+                finalMessage = finalMessage.replace(/\[SEND_QR\]/g, '').trim();
+
                 console.log(`📤 Sending AI response to ${from} (${finalMessage.length} chars)`);
                 await sendWhatsAppMessage(from, finalMessage);
+
+                // If AI decided to send bank details, send the QR image immediately after the text
+                if (needsQR) {
+                  const qrUrl = "https://tnvhriiyuzjhtdqfufmh.supabase.co/storage/v1/object/public/public-assets/ECA%20RHB%20QR.jpeg";
+                  await sendWhatsAppImage(from, qrUrl);
+                }
               }
             } catch (err) {
               console.error("❌ Background Processing Error:", err);
@@ -929,6 +938,20 @@ Reply to the customer message exactly as ${agentName} would.`;
     description: "Get a list of all car models available for rent in the company fleet.",
   };
 
+  const saveBookingLeadDeclaration: FunctionDeclaration = {
+    name: "save_booking_lead",
+    description: "Save the customer's booking details to the database once they have agreed to the price and are sending documents.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        car_model: { type: Type.STRING, description: "The car model they are booking." },
+        area: { type: Type.STRING, description: "Local or Outstation." },
+        rental_dates: { type: Type.STRING, description: "The dates they are renting." }
+      },
+      required: ["car_model", "area", "rental_dates"],
+    },
+  };
+
   try {
     if (!GEMINI_API_KEY) {
       console.error("GEMINI_API_KEY is missing!");
@@ -943,7 +966,7 @@ Reply to the customer message exactly as ${agentName} would.`;
         temperature: 0.7,
         topK: 40,
         topP: 0.95,
-        tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration] }],
+        tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
       }
     });
 
@@ -1005,6 +1028,29 @@ Reply to the customer message exactly as ${agentName} would.`;
           } else {
             toolResult = { error: "External Supabase keys not configured." };
           }
+        } else if (call.name === "save_booking_lead") {
+          toolCalled = true;
+          const args = call.args as any;
+          try {
+            // Save to the local AI database
+            const { error } = await supabase.from('booking_leads').insert([{
+              ticket_id: ticket.id,
+              customer_phone: customerName, // Or use the 'from' phone number variable
+              car_model: args.car_model,
+              area: args.area,
+              rental_dates: args.rental_dates
+            }]);
+
+            if (error) throw error;
+            
+            // Also update the ticket tag to alert the human agent
+            await supabase.from('tickets').update({ tag: 'Pending Verification', status: 'waiting_agent' }).eq('id', ticket.id);
+
+            toolResult = { success: true, message: "Booking saved. Inform the customer a human will verify documents." };
+          } catch (e: any) {
+            console.error("Save Booking Error:", e);
+            toolResult = { error: "Failed to save booking." };
+          }
         }
 
         if (toolCalled) {
@@ -1034,7 +1080,7 @@ Reply to the customer message exactly as ${agentName} would.`;
             temperature: 0.7,
             topK: 40,
             topP: 0.95,
-            tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration] }],
+            tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
           }
         });
       } else {
@@ -1067,4 +1113,21 @@ Reply to the customer message exactly as ${agentName} would.`;
     console.error("Gemini Fetch Error:", error);
     return "Kejap ya, I check dulu... [NEEDS_AGENT]";
   }
+}
+
+async function sendWhatsAppImage(to: string, imageUrl: string) {
+  const url = `https://graph.facebook.com/v17.0/${META_PHONE_ID}/messages`;
+  await fetch(url, {
+    method: "POST",
+    headers: {
+      "Authorization": `Bearer ${META_ACCESS_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      messaging_product: "whatsapp",
+      to: to,
+      type: "image",
+      image: { link: imageUrl },
+    }),
+  });
 }
