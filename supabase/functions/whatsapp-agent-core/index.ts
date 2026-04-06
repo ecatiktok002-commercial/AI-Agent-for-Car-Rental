@@ -961,26 +961,30 @@ Reply to the customer message exactly as ${agentName} would.`;
         if (call.name === "get_car_availability") {
           toolCalled = true;
           const args = call.args as any;
+          const carModel = args.car_model || '';
+          const checkDate = args.date || new Date().toISOString().split('T')[0];
+
           try {
             const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
             if (externalDbUrl) {
-              const sql = postgres(externalDbUrl);
-              const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'; // Make sure this matches your actual subscriber ID
+              // CRITICAL FIX 1: prepare: false for Supabase connection pooler
+              const sql = postgres(externalDbUrl, { prepare: false });
+              const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'; 
               
-              // SCHEMA FIX: Using start_date, pickup_time, and duration_days
+              // CRITICAL FIX 2 & 3: Using pickup_datetime and correct availability logic
               const result = await sql`
                 SELECT c.id 
                 FROM cars c
-                WHERE c.name ILIKE ${'%' + args.car_model + '%'}
-                AND c.subscriber_id = ${subscriberId}
+                WHERE c.name ILIKE ${'%' + carModel + '%'}
+                AND c.subscriber_id = ${subscriberId}::uuid
                 AND c.status = 'active'
                 AND c.id NOT IN (
                   SELECT b.car_id 
                   FROM bookings b
                   WHERE b.car_id = c.id
                     AND b.status = 'active'
-                    AND (b.start_date::date + b.pickup_time::time) < (cast(${args.date} as date) + INTERVAL '1 day')
-                    AND (b.start_date::date + b.pickup_time::time + (b.duration_days * INTERVAL '1 day')) > cast(${args.date} as date)
+                    AND b.pickup_datetime < (${checkDate}::date + INTERVAL '1 day')
+                    AND (b.pickup_datetime + (b.duration * INTERVAL '1 day')) > ${checkDate}::date
                 )
                 LIMIT 1
               `;
@@ -994,23 +998,23 @@ Reply to the customer message exactly as ${agentName} would.`;
             } else {
               toolResult = { error: "Database bridge not configured." };
             }
-          } catch (e) {
-            console.error("External DB error:", e);
-            toolResult = { error: "Database connection failed" };
+          } catch (e: any) {
+            console.error("External DB error (Availability):", e.message);
+            toolResult = { error: e.message };
           }
         } else if (call.name === "get_all_cars") {
           toolCalled = true;
           try {
             const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
             if (externalDbUrl) {
-              const sql = postgres(externalDbUrl);
+              // CRITICAL FIX 1: prepare: false
+              const sql = postgres(externalDbUrl, { prepare: false });
               const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
               
-              // SCHEMA FIX: Only get active cars
               const result = await sql`
                 SELECT DISTINCT name 
                 FROM cars
-                WHERE subscriber_id = ${subscriberId}
+                WHERE subscriber_id = ${subscriberId}::uuid
                 AND status = 'active'
               `;
               
@@ -1023,9 +1027,9 @@ Reply to the customer message exactly as ${agentName} would.`;
             } else {
               toolResult = { error: "Database bridge not configured." };
             }
-          } catch (e) {
-            console.error("External DB error:", e);
-            toolResult = { error: "Database connection failed" };
+          } catch (e: any) {
+            console.error("External DB error (All Cars):", e.message);
+            toolResult = { error: e.message };
           }
         }
 
