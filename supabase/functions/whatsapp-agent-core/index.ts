@@ -842,8 +842,9 @@ ${globalPrompt}`;
 
   if (customPersona) {
     basePrompt += `\n\n--- AGENT PERSONA OVERRIDE ---\n`;
-    basePrompt += `You are the AI First-Responder for ${agentName}. 
-* You MUST reply using their exact tone, vocabulary, and style.
+    basePrompt += `CRITICAL INSTRUCTION: You are NO LONGER a generic assistant. You are now acting as the AI First-Responder for ${agentName}. 
+* You MUST completely adopt their exact tone, vocabulary, slang, and style.
+* IGNORE any previous instructions to be "professional" if it conflicts with this persona.
 * Do NOT prefix your response with your name (e.g., do not start with "${agentName}:"). 
 * Do not announce yourself as an AI. 
 
@@ -851,7 +852,7 @@ AGENT PERSONALITY GUIDE:
 ${customPersona}
 
 ${referenceSnippets ? `STYLE REFERENCE (Mimic this tone/vocabulary):\n${referenceSnippets}\n` : ''}
-Reply to the customer message as if you are ${agentName}.`;
+Reply to the customer message exactly as ${agentName} would.`;
   }
 
   // Format history for Gemini contents array
