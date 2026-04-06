@@ -974,7 +974,22 @@ export default function TicketsPage() {
                         ? "bg-gradient-to-br from-indigo-50 via-purple-50 to-violet-50 border-indigo-100 text-indigo-900 rounded-tr-none"
                         : "bg-gradient-to-br from-emerald-50 via-teal-50 to-blue-50 border-emerald-100 text-emerald-900 rounded-tr-none"
                   )}>
-                    {msg.message_text.replace(/\[NEEDS_AGENT\]/g, '').trim()}
+                    {(() => {
+                      const cleanText = msg.message_text.replace(/\[NEEDS_AGENT\]/g, '').trim();
+                      const imageMatch = cleanText.match(/\[IMAGE_RECEIPT:\s*(.+?)\]/);
+                      
+                      if (imageMatch) {
+                        return (
+                          <div className="flex flex-col gap-2">
+                            <a href={imageMatch[1]} target="_blank" rel="noreferrer">
+                              <img src={imageMatch[1]} alt="Customer Upload" className="max-w-[200px] rounded-lg border border-slate-200 hover:opacity-90 transition-opacity" />
+                            </a>
+                            <span className="text-[10px] italic text-slate-400">Customer sent an image</span>
+                          </div>
+                        );
+                      }
+                      return cleanText;
+                    })()}
                   </div>
                 </div>
               );

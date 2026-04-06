@@ -486,11 +486,13 @@ serve(async (req) => {
 
         if (message) {
           const from = message.from; // Customer phone number
-          const text = message.text?.body;
+          let text = message.text?.body;
           const customerName = value?.contacts?.[0]?.profile?.name || "Customer";
           const whatsappMessageId = message.id;
 
-          if (!text) return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
+          if (!text && message.type !== 'image' && message.type !== 'document') {
+            return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
+          }
 
           // 1. Check if this message ID has already been processed
           const { data: existingMsg } = await supabase
@@ -581,6 +583,17 @@ serve(async (req) => {
                 if (ticketInsertError) throw ticketInsertError;
                 ticket = newTicket;
               }
+
+              // Download media if the customer sent an image or document
+              if (message.type === 'image' && message.image?.id) {
+                const mediaUrl = await processWhatsAppMedia(message.image.id, ticket.id, supabase, META_ACCESS_TOKEN);
+                text = mediaUrl ? `[IMAGE_RECEIPT: ${mediaUrl}]` : `[Customer sent an image, but it failed to download]`;
+              } else if (message.type === 'document' && message.document?.id) {
+                const mediaUrl = await processWhatsAppMedia(message.document.id, ticket.id, supabase, META_ACCESS_TOKEN);
+                text = mediaUrl ? `[DOCUMENT_RECEIPT: ${mediaUrl}]` : `[Customer sent a document, but it failed to download]`;
+              }
+              
+              if (!text) return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
 
               // 3. Save Inbound Message with WhatsApp ID
               const { data: msgInsertData, error: msgInsertError } = await supabase.from("messages").insert([{
@@ -1130,4 +1143,42 @@ async function sendWhatsAppImage(to: string, imageUrl: string) {
       image: { link: imageUrl },
     }),
   });
+}
+
+// Helper: Download Media from WhatsApp and Upload to Supabase Storage
+async function processWhatsAppMedia(mediaId: string, ticketId: string, supabaseClient: any, token: string) {
+  try {
+    // 1. Get the media URL from Meta
+    const metaRes = await fetch(`https://graph.facebook.com/v17.0/${mediaId}`, {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    const metaData = await metaRes.json();
+    if (!metaData.url) return null;
+
+    // 2. Download the actual binary file
+    const fileRes = await fetch(metaData.url, {
+      headers: { "Authorization": `Bearer ${token}` }
+    });
+    const blob = await fileRes.blob();
+
+    // 3. Upload to Supabase Storage (Bucket must be named 'chat_media' and public)
+    const fileExt = metaData.mime_type?.split('/')[1] || 'bin';
+    const fileName = `${ticketId}/${Date.now()}_${mediaId}.${fileExt}`;
+    
+    const { error } = await supabaseClient.storage
+      .from('chat_media')
+      .upload(fileName, blob, {
+        contentType: metaData.mime_type,
+        upsert: false
+      });
+
+    if (error) throw error;
+
+    // 4. Get the Public URL
+    const { data: publicUrlData } = supabaseClient.storage.from('chat_media').getPublicUrl(fileName);
+    return publicUrlData.publicUrl;
+  } catch (e) {
+    console.error("Error processing media:", e);
+    return null;
+  }
 }
