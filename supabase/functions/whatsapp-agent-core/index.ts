@@ -966,7 +966,7 @@ Reply to the customer message as if you are ${agentName}.`;
               const sql = postgres(externalDbUrl);
               const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'; // Make sure this matches your actual subscriber ID
               
-              // SCHEMA FIX: Using pickup_datetime and checking statuses
+              // SCHEMA FIX: Using start_date, pickup_time, and duration_days
               const result = await sql`
                 SELECT c.id 
                 FROM cars c
@@ -978,8 +978,8 @@ Reply to the customer message as if you are ${agentName}.`;
                   FROM bookings b
                   WHERE b.car_id = c.id
                     AND b.status = 'active'
-                    AND b.pickup_datetime < (cast(${args.date} as date) + INTERVAL '1 day')
-                    AND (b.pickup_datetime + (b.duration * INTERVAL '1 day')) > cast(${args.date} as date)
+                    AND (b.start_date::date + b.pickup_time::time) < (cast(${args.date} as date) + INTERVAL '1 day')
+                    AND (b.start_date::date + b.pickup_time::time + (b.duration_days * INTERVAL '1 day')) > cast(${args.date} as date)
                 )
                 LIMIT 1
               `;
