@@ -11,6 +11,11 @@ const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
+// ADD THESE 3 LINES:
+const EXT_URL = Deno.env.get("EXTERNAL_SUPABASE_URL");
+const EXT_KEY = Deno.env.get("EXTERNAL_SUPABASE_ANON_KEY");
+const extSupabase = EXT_URL && EXT_KEY ? createClient(EXT_URL, EXT_KEY) : null;
+
 // Initialize Supabase client
 const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
@@ -964,72 +969,41 @@ Reply to the customer message exactly as ${agentName} would.`;
           const carModel = args.car_model || '';
           const checkDate = args.date || new Date().toISOString().split('T')[0];
 
-          try {
-            const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
-            if (externalDbUrl) {
-              // CRITICAL FIX 1: prepare: false for Supabase connection pooler
-              const sql = postgres(externalDbUrl, { prepare: false });
-              const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'; 
-              
-              // CRITICAL FIX 2 & 3: Using pickup_datetime and correct availability logic
-              const result = await sql`
-                SELECT c.id 
-                FROM cars c
-                WHERE c.name ILIKE ${'%' + carModel + '%'}
-                AND c.subscriber_id = ${subscriberId}::uuid
-                AND c.status = 'active'
-                AND c.id NOT IN (
-                  SELECT b.car_id 
-                  FROM bookings b
-                  WHERE b.car_id = c.id
-                    AND b.status = 'active'
-                    AND b.pickup_datetime < (${checkDate}::date + INTERVAL '1 day')
-                    AND (b.pickup_datetime + (b.duration * INTERVAL '1 day')) > ${checkDate}::date
-                )
-                LIMIT 1
-              `;
-              
-              if (result && result.length > 0) {
-                toolResult = { available: true };
-              } else {
-                toolResult = { available: false };
-              }
-              await sql.end();
+          if (extSupabase) {
+            // Call the database function via safe HTTPS API
+            const { data, error } = await extSupabase.rpc('check_car_availability', {
+              p_model: carModel,
+              p_date: checkDate,
+              p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
+            });
+
+            if (error) {
+              console.error("RPC Error (Availability):", error.message);
+              toolResult = { error: error.message };
             } else {
-              toolResult = { error: "Database bridge not configured." };
+              toolResult = { available: data === true };
             }
-          } catch (e: any) {
-            console.error("External DB error (Availability):", e.message);
-            toolResult = { error: e.message };
+          } else {
+            toolResult = { error: "External Supabase keys not configured." };
           }
+
         } else if (call.name === "get_all_cars") {
           toolCalled = true;
-          try {
-            const externalDbUrl = Deno.env.get("EXTERNAL_DB_URL");
-            if (externalDbUrl) {
-              // CRITICAL FIX 1: prepare: false
-              const sql = postgres(externalDbUrl, { prepare: false });
-              const subscriberId = 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
-              
-              const result = await sql`
-                SELECT DISTINCT name 
-                FROM cars
-                WHERE subscriber_id = ${subscriberId}::uuid
-                AND status = 'active'
-              `;
-              
-              if (result && result.length > 0) {
-                toolResult = { cars: result.map((r: any) => r.name) };
-              } else {
-                toolResult = { cars: [] };
-              }
-              await sql.end();
+          
+          if (extSupabase) {
+            // Call the database function via safe HTTPS API
+            const { data, error } = await extSupabase.rpc('get_all_car_models', {
+              p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
+            });
+
+            if (error) {
+              console.error("RPC Error (All Cars):", error.message);
+              toolResult = { error: error.message };
             } else {
-              toolResult = { error: "Database bridge not configured." };
+              toolResult = { cars: data || [] };
             }
-          } catch (e: any) {
-            console.error("External DB error (All Cars):", e.message);
-            toolResult = { error: e.message };
+          } else {
+            toolResult = { error: "External Supabase keys not configured." };
           }
         }
 
