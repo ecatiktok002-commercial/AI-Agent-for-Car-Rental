@@ -490,6 +490,32 @@ serve(async (req) => {
           const customerName = value?.contacts?.[0]?.profile?.name || "Customer";
           const whatsappMessageId = message.id;
 
+          const ADMIN_PHONE = Deno.env.get("ADMIN_PHONE_NUMBER");
+
+          // --- ADMIN INTERCEPTOR ---
+          // If the message is from the Admin and starts with APPROVE
+          if (from === ADMIN_PHONE && text && text.toUpperCase().startsWith("APPROVE ")) {
+            const customerPhoneToApprove = text.split(" ")[1].trim(); // Gets the phone number
+            
+            // 1. Send success message to Customer asking for documents
+            const approvalMsg = "✅ *Payment Verified!*\n\nTerima kasih boss, payment dah confirm masuk. Untuk final step rekod insurans, boleh share gambar:\n1. IC (Depan & Belakang)\n2. Lesen Memandu\n3. Bil Utiliti (Air/Api)";
+            await sendWhatsAppMessage(customerPhoneToApprove, approvalMsg);
+
+            // 2. Send confirmation back to Admin
+            await sendWhatsAppMessage(ADMIN_PHONE, `✅ Approval sent to ${customerPhoneToApprove}. System is now asking them for documents.`);
+            
+            return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
+          }
+          
+          // If the message is from the Admin and starts with REJECT
+          if (from === ADMIN_PHONE && text && text.toUpperCase().startsWith("REJECT ")) {
+            const customerPhoneToReject = text.split(" ")[1].trim();
+            await sendWhatsAppMessage(customerPhoneToReject, "❌ *Payment Failed*\n\nMaaf boss, admin check payment tak masuk lagi. Boleh try check balik bank history atau resit tak?");
+            await sendWhatsAppMessage(ADMIN_PHONE, `❌ Rejection sent to ${customerPhoneToReject}.`);
+            return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
+          }
+          // -------------------------
+
           if (!text && message.type !== 'image' && message.type !== 'document') {
             return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
           }
@@ -965,6 +991,19 @@ Reply to the customer message exactly as ${agentName} would.`;
     },
   };
 
+  const requestHumanApprovalDeclaration: FunctionDeclaration = {
+    name: "request_human_approval",
+    description: "Send the customer's receipt to the human admin for manual bank verification.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {
+        receipt_url: { type: Type.STRING, description: "The https URL of the receipt image." },
+        car_details: { type: Type.STRING, description: "The car model and dates they are booking." }
+      },
+      required: ["receipt_url", "car_details"],
+    },
+  };
+
   try {
     if (!GEMINI_API_KEY) {
       console.error("GEMINI_API_KEY is missing!");
@@ -979,7 +1018,7 @@ Reply to the customer message exactly as ${agentName} would.`;
         temperature: 0.7,
         topK: 40,
         topP: 0.95,
-        tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
+        tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration] }],
       }
     });
 
@@ -1064,6 +1103,25 @@ Reply to the customer message exactly as ${agentName} would.`;
             console.error("Save Booking Error:", e);
             toolResult = { error: "Failed to save booking." };
           }
+        } else if (call.name === "request_human_approval") {
+          toolCalled = true;
+          const args = call.args as any;
+          
+          try {
+            const ADMIN_PHONE = Deno.env.get("ADMIN_PHONE_NUMBER");
+            if (ADMIN_PHONE) {
+              const adminAlert = `🚨 *NEW PAYMENT APPROVAL REQUIRED* 🚨\n\n*Customer Phone:* ${from}\n*Details:* ${args.car_details}\n*Receipt URL:* ${args.receipt_url}\n\n*To APPROVE and ask for documents, reply:* \nAPPROVE ${from}\n\n*To REJECT, reply:* \nREJECT ${from}`;
+              
+              // Send message to the Admin
+              await sendWhatsAppMessage(ADMIN_PHONE, adminAlert);
+              toolResult = { success: true, message: "Admin notified." };
+            } else {
+              toolResult = { error: "Admin phone not set." };
+            }
+          } catch (e: any) {
+            console.error("Failed to notify admin:", e);
+            toolResult = { error: "Failed to notify." };
+          }
         }
 
         if (toolCalled) {
@@ -1093,7 +1151,7 @@ Reply to the customer message exactly as ${agentName} would.`;
             temperature: 0.7,
             topK: 40,
             topP: 0.95,
-            tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
+            tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration] }],
           }
         });
       } else {
