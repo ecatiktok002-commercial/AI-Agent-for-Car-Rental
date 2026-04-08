@@ -997,9 +997,11 @@ Reply to the customer message exactly as ${agentName} would.`;
       type: Type.OBJECT,
       properties: {
         receipt_url: { type: Type.STRING, description: "The https URL of the receipt image." },
-        car_details: { type: Type.STRING, description: "The car model and dates they are booking." }
+        car_details: { type: Type.STRING, description: "The car model they are booking." },
+        rental_dates: { type: Type.STRING, description: "The dates they are renting." },
+        pickup_time: { type: Type.STRING, description: "The time they will pick up the car." }
       },
-      required: ["receipt_url", "car_details"],
+      required: ["receipt_url", "car_details", "rental_dates", "pickup_time"],
     },
   };
 
@@ -1107,7 +1109,7 @@ Reply to the customer message exactly as ${agentName} would.`;
           const args = call.args as any;
           
           try {
-            // The dedicated admin number (Make sure to include the country code, e.g., 60 for Malaysia, without the '+' or spaces)
+            // The dedicated admin number
             const ADMIN_WHATSAPP_NUMBER = Deno.env.get("ADMIN_PHONE_NUMBER") || "60191234567"; 
 
             const payload = {
@@ -1121,9 +1123,11 @@ Reply to the customer message exactly as ${agentName} would.`;
                   {
                     "type": "body",
                     "parameters": [
-                      { "type": "text", "text": from },
-                      { "type": "text", "text": args.car_details },
-                      { "type": "text", "text": args.receipt_url }
+                      { "type": "text", "text": from },                      // {{1}} Customer Phone
+                      { "type": "text", "text": args.rental_dates },         // {{2}} Date
+                      { "type": "text", "text": args.car_details },          // {{3}} Details (Car model)
+                      { "type": "text", "text": args.pickup_time },          // {{4}} Pickup time
+                      { "type": "text", "text": args.receipt_url }           // {{5}} Receipt URL
                     ]
                   }
                 ]
