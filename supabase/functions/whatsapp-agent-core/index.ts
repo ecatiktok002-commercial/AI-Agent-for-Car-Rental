@@ -495,14 +495,13 @@ serve(async (req) => {
           // --- ADMIN INTERCEPTOR ---
           // If the message is from the Admin and starts with APPROVE
           if (from === ADMIN_PHONE && text && text.toUpperCase().startsWith("APPROVE ")) {
-            const customerPhoneToApprove = text.split(" ")[1].trim(); // Gets the phone number
+            const customerPhoneToApprove = text.split(" ")[1].trim(); 
             
-            // 1. Send success message to Customer asking for documents
-            const approvalMsg = "✅ *Payment Verified!*\n\nTerima kasih boss, payment dah confirm masuk. Untuk final step rekod insurans, boleh share gambar:\n1. IC (Depan & Belakang)\n2. Lesen Memandu\n3. Bil Utiliti (Air/Api)";
+            // NEW APPROVAL MESSAGE (No longer asks for IC because AI already got it)
+            const approvalMsg = "✅ *Booking Confirmed!*\n\nTerima kasih boss! Payment and dokumen semua dah lepas verify. payment ca mintak? Booking awak dah berjaya di-lock. Jumpa masa hari pickup nanti! 🎉";
             await sendWhatsAppMessage(customerPhoneToApprove, approvalMsg);
 
-            // 2. Send confirmation back to Admin
-            await sendWhatsAppMessage(ADMIN_PHONE, `✅ Approval sent to ${customerPhoneToApprove}. System is now asking them for documents.`);
+            await sendWhatsAppMessage(ADMIN_PHONE, `✅ Approval sent to ${customerPhoneToApprove}. Booking is now confirmed.`);
             
             return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
           }
