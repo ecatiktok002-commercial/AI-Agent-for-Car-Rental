@@ -129,7 +129,7 @@ export default function LoginPage() {
     <div className="min-h-screen bg-slate-50 flex flex-col justify-center py-12 px-6 lg:px-8 font-sans">
       <div className="sm:mx-auto sm:w-full sm:max-w-2xl">
         <div className="text-center mb-10">
-          <img src="/logo.png" alt="Logo" className="mx-auto h-14 w-14 rounded-2xl mb-6 shadow-xl shadow-black/10 object-cover" />
+          <img src="https://tnvhriiyuzjhtdqfufmh.supabase.co/storage/v1/object/public/public-assets/logo.png" alt="Logo" className="mx-auto h-14 w-14 rounded-2xl mb-6 shadow-xl shadow-black/10 object-cover" />
           <h2 className="text-3xl font-bold tracking-tight text-slate-900">
             {mode === 'login' ? 'Welcome back' : 'Create an account'}
           </h2>

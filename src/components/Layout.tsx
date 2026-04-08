@@ -13,7 +13,7 @@ const Layout: React.FC = () => {
         {/* Mobile Header */}
         <div className="md:hidden flex items-center justify-between p-4 bg-white border-b border-slate-200 shrink-0">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Logo" className="w-8 h-8 rounded-lg object-cover" />
+            <img src="https://tnvhriiyuzjhtdqfufmh.supabase.co/storage/v1/object/public/public-assets/logo.png" alt="Logo" className="w-8 h-8 rounded-lg object-cover" />
             <span className="font-bold text-xl tracking-tight">HelpDesk</span>
           </div>
           <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-lg">

@@ -111,7 +111,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, setIsOpen }) => {
       )}>
         <div className="p-6 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <img src="/logo.png" alt="Logo" className="w-8 h-8 rounded-lg object-cover" />
+            <img src="https://tnvhriiyuzjhtdqfufmh.supabase.co/storage/v1/object/public/public-assets/logo.png" alt="Logo" className="w-8 h-8 rounded-lg object-cover" />
             <span className="font-bold text-xl tracking-tight">HelpDesk</span>
           </div>
           <button 
