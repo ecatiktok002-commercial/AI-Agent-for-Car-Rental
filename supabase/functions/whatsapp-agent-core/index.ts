@@ -950,7 +950,7 @@ Reply to the customer message exactly as ${agentName} would.`;
 
   // Add a final instruction to the basePrompt to ensure completion
   const todayDate = new Date().toISOString().split('T')[0];
-  const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.`;
+  const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.\n\nPAYMENT RULE: Payment can ONLY be made via QR code. Do NOT provide bank account numbers (like Maybank). When requesting payment, you MUST include the exact text "[SEND_QR]" anywhere in your message. The system will automatically attach the QR image.`;
 
   const getCarAvailabilityDeclaration: FunctionDeclaration = {
     name: "get_car_availability",
@@ -1107,16 +1107,40 @@ Reply to the customer message exactly as ${agentName} would.`;
           const args = call.args as any;
           
           try {
-            const ADMIN_PHONE = Deno.env.get("ADMIN_PHONE_NUMBER");
-            if (ADMIN_PHONE) {
-              const adminAlert = `🚨 *NEW PAYMENT APPROVAL REQUIRED* 🚨\n\n*Customer Phone:* ${from}\n*Details:* ${args.car_details}\n*Receipt URL:* ${args.receipt_url}\n\n*To APPROVE and ask for documents, reply:* \nAPPROVE ${from}\n\n*To REJECT, reply:* \nREJECT ${from}`;
-              
-              // Send message to the Admin
-              await sendWhatsAppMessage(ADMIN_PHONE, adminAlert);
-              toolResult = { success: true, message: "Admin notified." };
-            } else {
-              toolResult = { error: "Admin phone not set." };
-            }
+            // The dedicated admin number (Make sure to include the country code, e.g., 60 for Malaysia, without the '+' or spaces)
+            const ADMIN_WHATSAPP_NUMBER = Deno.env.get("ADMIN_PHONE_NUMBER") || "60191234567"; 
+
+            const payload = {
+              "messaging_product": "whatsapp",
+              "to": ADMIN_WHATSAPP_NUMBER, 
+              "type": "template",
+              "template": {
+                "name": "admin_booking_alert",
+                "language": { "code": "en" },
+                "components": [
+                  {
+                    "type": "body",
+                    "parameters": [
+                      { "type": "text", "text": from },
+                      { "type": "text", "text": args.car_details },
+                      { "type": "text", "text": args.receipt_url }
+                    ]
+                  }
+                ]
+              }
+            };
+
+            const url = `https://graph.facebook.com/v17.0/${META_PHONE_ID}/messages`;
+            await fetch(url, {
+              method: "POST",
+              headers: {
+                "Authorization": `Bearer ${META_ACCESS_TOKEN}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(payload),
+            });
+            
+            toolResult = { success: true, message: "Admin notified." };
           } catch (e: any) {
             console.error("Failed to notify admin:", e);
             toolResult = { error: "Failed to notify." };
