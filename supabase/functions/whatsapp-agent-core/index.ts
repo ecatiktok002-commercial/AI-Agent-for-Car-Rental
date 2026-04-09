@@ -950,7 +950,7 @@ Reply to the customer message exactly as ${agentName} would.`;
 
   // Add a final instruction to the basePrompt to ensure completion
   const todayDate = new Date().toISOString().split('T')[0];
-  const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.\n\nBOOKING WORKFLOW (STRICT):\n1. When a customer agrees to rent a car for specific dates, tell them the total price and ask them to make the payment.\n2. You MUST include the exact text "[SEND_QR]" in your message asking for payment so the system attaches the QR code.\n3. Ask them to upload the payment receipt and their IC/License.\n4. Wait for them to upload the receipt. DO NOT save the booking before the receipt is uploaded.\n5. Once they upload the receipt (image), call the 'submit_booking_for_approval' tool to save the booking and email the Admin.`;
+  const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.\n\nBOOKING WORKFLOW (STRICT):\n1. When a customer agrees to rent a car for specific dates, tell them the total price and ask them to make the payment.\n2. You MUST include the exact text "[SEND_QR]" in your message asking for payment so the system attaches the QR code. (Example: "Boleh scan QR ni ya [SEND_QR]").\n3. Ask them to upload the payment receipt, their IC/License, and their utility bill (bil elektrik/air). DO NOT ask for their current address (alamat terkini).\n4. Wait for them to upload the receipt. DO NOT save the booking before the receipt is uploaded.\n5. Once they upload the receipt (image), call the 'submit_booking_for_approval' tool to save the booking and email the Admin.`;
 
   const getCarAvailabilityDeclaration: FunctionDeclaration = {
     name: "get_car_availability",
@@ -1092,14 +1092,14 @@ Reply to the customer message exactly as ${agentName} would.`;
             const ADMIN_EMAIL = Deno.env.get("ADMIN_EMAIL") || "your-email@example.com";
 
             if (RESEND_API_KEY) {
-              await fetch("https://api.resend.com/emails", {
+              const emailResponse = await fetch("https://api.resend.com/emails", {
                 method: "POST",
                 headers: {
                   "Authorization": `Bearer ${RESEND_API_KEY}`,
                   "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                  from: "Acme Car Rental <onboarding@resend.dev>", // Change Acme Car Rental to your business name
+                  from: "ECA Car Rental <onboarding@resend.dev>", 
                   to: ADMIN_EMAIL,
                   subject: `🚨 New Booking Approval Needed: ${args.car_model}`,
                   html: `
@@ -1117,8 +1117,17 @@ Reply to the customer message exactly as ${agentName} would.`;
                   `
                 })
               });
+
+              // NEW: Catch and log the exact error from Resend
+              const emailResult = await emailResponse.json();
+              if (!emailResponse.ok) {
+                console.error("❌ Resend API Error:", JSON.stringify(emailResult, null, 2));
+              } else {
+                console.log("✅ Email sent successfully:", emailResult.id);
+              }
+
             } else {
-              console.warn("RESEND_API_KEY not found. Email notification skipped.");
+              console.warn("⚠️ RESEND_API_KEY not found. Email notification skipped.");
             }
 
             toolResult = { success: true, message: "Booking submitted successfully. Tell the customer that an admin is verifying their payment and will confirm shortly." };
