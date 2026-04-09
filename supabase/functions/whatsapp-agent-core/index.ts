@@ -988,6 +988,10 @@ BOOKING WORKFLOW RULE:
   const getAllCarsDeclaration: FunctionDeclaration = {
     name: "get_all_cars",
     description: "Get a list of all car models available for rent in the company fleet.",
+    parameters: {
+      type: Type.OBJECT,
+      properties: {},
+    }
   };
 
   const saveBookingLeadDeclaration: FunctionDeclaration = {
@@ -1014,7 +1018,7 @@ BOOKING WORKFLOW RULE:
 
     // NEW: Helper function to automatically switch models on failure
     const callGeminiWithFallback = async (requestParams: any) => {
-      const primaryModel = "gemini-3.1-flash-lite-preview";
+      const primaryModel = "gemini-1.5-flash";
       const fallbackModel = "gemini-2.0-flash"; // Reliable, stable production model
       
       try {
@@ -1062,45 +1066,55 @@ BOOKING WORKFLOW RULE:
 
         if (call.name === "get_car_availability") {
           toolCalled = true;
-          const args = call.args as any;
-          const carModel = args.car_model || '';
-          const checkDate = args.date || new Date().toISOString().split('T')[0];
+          try {
+            const args = call.args as any;
+            const carModel = args.car_model || '';
+            const checkDate = args.date || new Date().toISOString().split('T')[0];
 
-          if (extSupabase) {
-            // Call the database function via safe HTTPS API
-            const { data, error } = await extSupabase.rpc('check_car_availability', {
-              p_model: carModel,
-              p_date: checkDate,
-              p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
-            });
+            if (extSupabase) {
+              // Call the database function via safe HTTPS API
+              const { data, error } = await extSupabase.rpc('check_car_availability', {
+                p_model: carModel,
+                p_date: checkDate,
+                p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
+              });
 
-            if (error) {
-              console.error("RPC Error (Availability):", error.message);
-              toolResult = { error: error.message };
+              if (error) {
+                console.error("RPC Error (Availability):", error.message);
+                toolResult = { error: error.message };
+              } else {
+                toolResult = { available: data === true };
+              }
             } else {
-              toolResult = { available: data === true };
+              toolResult = { error: "External Supabase keys not configured." };
             }
-          } else {
-            toolResult = { error: "External Supabase keys not configured." };
+          } catch (e: any) {
+            console.error("Tool Execution Error (Availability):", e.message);
+            toolResult = { error: e.message };
           }
 
         } else if (call.name === "get_all_cars") {
           toolCalled = true;
           
-          if (extSupabase) {
-            // Call the database function via safe HTTPS API
-            const { data, error } = await extSupabase.rpc('get_all_car_models', {
-              p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
-            });
+          try {
+            if (extSupabase) {
+              // Call the database function via safe HTTPS API
+              const { data, error } = await extSupabase.rpc('get_all_car_models', {
+                p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
+              });
 
-            if (error) {
-              console.error("RPC Error (All Cars):", error.message);
-              toolResult = { error: error.message };
+              if (error) {
+                console.error("RPC Error (All Cars):", error.message);
+                toolResult = { error: error.message };
+              } else {
+                toolResult = { cars: data || [] };
+              }
             } else {
-              toolResult = { cars: data || [] };
+              toolResult = { error: "External Supabase keys not configured." };
             }
-          } else {
-            toolResult = { error: "External Supabase keys not configured." };
+          } catch (e: any) {
+            console.error("Tool Execution Error (All Cars):", e.message);
+            toolResult = { error: e.message };
           }
         } else if (call.name === "save_booking_lead") {
           toolCalled = true;
@@ -1194,7 +1208,7 @@ BOOKING WORKFLOW RULE:
             temperature: 0.7,
             topK: 40,
             topP: 0.95,
-            tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, submitBookingForApprovalDeclaration] }],
+            tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
           }
         });
       } else {
