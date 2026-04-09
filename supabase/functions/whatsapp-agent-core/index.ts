@@ -1092,14 +1092,14 @@ Reply to the customer message exactly as ${agentName} would.`;
             const ADMIN_EMAIL = Deno.env.get("ADMIN_EMAIL") || "your-email@example.com";
 
             if (RESEND_API_KEY) {
-              const emailResponse = await fetch("https://api.resend.com/emails", {
+              await fetch("https://api.resend.com/emails", {
                 method: "POST",
                 headers: {
                   "Authorization": `Bearer ${RESEND_API_KEY}`,
                   "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                  from: "ECA Car Rental <onboarding@resend.dev>", 
+                  from: "Acme Car Rental <onboarding@resend.dev>", // Change Acme Car Rental to your business name
                   to: ADMIN_EMAIL,
                   subject: `🚨 New Booking Approval Needed: ${args.car_model}`,
                   html: `
@@ -1117,17 +1117,8 @@ Reply to the customer message exactly as ${agentName} would.`;
                   `
                 })
               });
-
-              // NEW: Catch and log the exact error from Resend
-              const emailResult = await emailResponse.json();
-              if (!emailResponse.ok) {
-                console.error("❌ Resend API Error:", JSON.stringify(emailResult, null, 2));
-              } else {
-                console.log("✅ Email sent successfully:", emailResult.id);
-              }
-
             } else {
-              console.warn("⚠️ RESEND_API_KEY not found. Email notification skipped.");
+              console.warn("RESEND_API_KEY not found. Email notification skipped.");
             }
 
             toolResult = { success: true, message: "Booking submitted successfully. Tell the customer that an admin is verifying their payment and will confirm shortly." };
