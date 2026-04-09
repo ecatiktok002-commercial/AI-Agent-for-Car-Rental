@@ -997,8 +997,28 @@ Reply to the customer message exactly as ${agentName} would.`;
       throw new Error("GEMINI_API_KEY is missing");
     }
 
-    let response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-lite-preview",
+    // NEW: Helper function to automatically switch models on failure
+    const callGeminiWithFallback = async (requestParams: any) => {
+      const primaryModel = "gemini-3.1-flash-lite-preview";
+      const fallbackModel = "gemini-2.0-flash"; // Reliable, stable production model
+      
+      try {
+        return await ai.models.generateContent({
+          ...requestParams,
+          model: primaryModel
+        });
+      } catch (error: any) {
+        console.warn(`⚠️ Primary model (${primaryModel}) failed: ${error.message}. Rerouting to fallback (${fallbackModel})...`);
+        // If the preview model fails (503), instantly try the stable model
+        return await ai.models.generateContent({
+          ...requestParams,
+          model: fallbackModel
+        });
+      }
+    };
+
+    // 1. First AI Call using the fallback helper
+    let response = await callGeminiWithFallback({
       contents: contents,
       config: {
         systemInstruction: finalBasePrompt,
@@ -1146,9 +1166,8 @@ Reply to the customer message exactly as ${agentName} would.`;
           parts: functionResponseParts
         });
 
-        // Call Gemini again with the tool responses
-        response = await ai.models.generateContent({
-          model: "gemini-3.1-flash-lite-preview",
+        // Call Gemini again with the tool responses using fallback
+        response = await callGeminiWithFallback({
           contents: contents,
           config: {
             systemInstruction: finalBasePrompt,
