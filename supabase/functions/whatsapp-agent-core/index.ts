@@ -1280,7 +1280,7 @@ BOOKING WORKFLOW (STRICT):
           const extractionPrompt = `Extract the car model, area, and rental dates from this conversation history. Return ONLY a valid JSON object with keys: "car_model", "area", "rental_dates". If you cannot find a value, use "Unknown". Do not include markdown formatting. Conversation: ${JSON.stringify(contents)}`;
           
           const extraction = await ai.models.generateContent({
-            model: "gemini-2.5-flash",
+            model: "gemini-1.5-flash",
             contents: extractionPrompt
           });
           
@@ -1292,7 +1292,7 @@ BOOKING WORKFLOW (STRICT):
             console.error("Failed to parse extraction JSON:", parseErr);
           }
 
-          // Insert using ONLY the safe original columns to prevent database crashes
+          // Insert into booking_leads with all available info
           await supabase.from('booking_leads').insert([{
             ticket_id: ticket.id,
             customer_phone: customerPhone,
