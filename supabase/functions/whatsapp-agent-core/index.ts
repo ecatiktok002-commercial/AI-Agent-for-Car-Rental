@@ -1118,7 +1118,7 @@ BOOKING WORKFLOW (STRICT):
               area: args.area,
               rental_dates: args.rental_dates,
               pickup_time: args.pickup_time,
-              duration_days: args.duration_days,
+              duration_days: parseInt(args.duration_days) || null,
               receipt_url: args.receipt_url,
               ic_url: args.ic_url,
               license_url: args.license_url,
