@@ -1243,4 +1243,4 @@ async function processWhatsAppMedia(mediaId: string, ticketId: string, supabaseC
     console.error("Error processing media:", e);
     return null;
   }
-}
+} 
