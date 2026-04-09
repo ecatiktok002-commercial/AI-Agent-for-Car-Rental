@@ -497,6 +497,13 @@ serve(async (req) => {
           if (from === ADMIN_PHONE && text && text.toUpperCase().startsWith("APPROVE ")) {
             const customerPhoneToApprove = text.split(" ")[1].trim(); 
             
+            // UPDATE booking_leads status to confirmed
+            await supabase
+              .from("booking_leads")
+              .update({ status: "confirmed" })
+              .eq("customer_phone", customerPhoneToApprove)
+              .eq("status", "pending_verification");
+
             // NEW APPROVAL MESSAGE (No longer asks for IC because AI already got it)
             const approvalMsg = "✅ *Booking Confirmed!*\n\nTerima kasih boss! Payment and dokumen semua dah lepas verify. payment ca mintak? Booking awak dah berjaya di-lock. Jumpa masa hari pickup nanti! 🎉";
             await sendWhatsAppMessage(customerPhoneToApprove, approvalMsg);
@@ -509,6 +516,14 @@ serve(async (req) => {
           // If the message is from the Admin and starts with REJECT
           if (from === ADMIN_PHONE && text && text.toUpperCase().startsWith("REJECT ")) {
             const customerPhoneToReject = text.split(" ")[1].trim();
+            
+            // UPDATE booking_leads status to rejected
+            await supabase
+              .from("booking_leads")
+              .update({ status: "rejected" })
+              .eq("customer_phone", customerPhoneToReject)
+              .eq("status", "pending_verification");
+
             await sendWhatsAppMessage(customerPhoneToReject, "❌ *Payment Failed*\n\nMaaf boss, admin check payment tak masuk lagi. Boleh try check balik bank history atau resit tak?");
             await sendWhatsAppMessage(ADMIN_PHONE, `❌ Rejection sent to ${customerPhoneToReject}.`);
             return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
@@ -701,11 +716,11 @@ serve(async (req) => {
                   }
                 }
 
-                // Fetch last 10 messages for context
+                // Fetch last 10 messages for context from this customer (across all their tickets)
                 const { data: history } = await supabase
                   .from("messages")
-                  .select("sender_type, message_text, created_at")
-                  .eq("ticket_id", ticket.id)
+                  .select("sender_type, message_text, created_at, tickets!inner(customer_id)")
+                  .eq("tickets.customer_id", customer.id)
                   .order("created_at", { ascending: false })
                   .limit(10);
 
