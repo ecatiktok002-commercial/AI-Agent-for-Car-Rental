@@ -7,14 +7,28 @@ import { BookingLead } from '../types';
 export default function BookingsPage() {
   const [leads, setLeads] = useState<BookingLead[]>([]);
   const [selectedLead, setSelectedLead] = useState<BookingLead | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     const fetchLeads = async () => {
-      const { data } = await supabase
+      console.log("Fetching booking leads...");
+      const { data, error: fetchError } = await supabase
         .from('booking_leads')
-        .select('*, tickets(customer:customers(name, phone_number))')
+        .select('*')
         .order('created_at', { ascending: false });
-      setLeads(data || []);
+      
+      if (fetchError) {
+        console.error("Error fetching leads:", fetchError);
+        if (fetchError.code === 'PGRST116' || fetchError.message.includes('does not exist')) {
+          setError("The 'booking_leads' table is missing. Please run the SQL command provided in the chat to create it.");
+        } else {
+          setError(fetchError.message);
+        }
+      } else {
+        console.log("Leads fetched:", data?.length);
+        setLeads(data || []);
+        setError(null);
+      }
     };
     fetchLeads();
 
@@ -38,17 +52,32 @@ export default function BookingsPage() {
           <h1 className="text-2xl font-bold text-slate-900">Booking Approvals</h1>
           <p className="text-slate-500">Review customer documents and verify payments.</p>
         </div>
-        <div className="flex gap-4 text-sm">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-amber-400"></div>
-            <span className="text-slate-600">Pending</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded-full bg-emerald-400"></div>
-            <span className="text-slate-600">Confirmed</span>
+        <div className="flex items-center gap-4">
+          <button 
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-slate-100 text-slate-600 rounded-lg text-sm font-medium hover:bg-slate-200 transition-colors"
+          >
+            Refresh Data
+          </button>
+          <div className="flex gap-4 text-sm">
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-amber-400"></div>
+              <span className="text-slate-600">Pending</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <div className="w-3 h-3 rounded-full bg-emerald-400"></div>
+              <span className="text-slate-600">Confirmed</span>
+            </div>
           </div>
         </div>
       </div>
+
+      {error && (
+        <div className="p-4 bg-red-50 border border-red-200 rounded-xl text-red-700 text-sm flex items-center gap-3">
+          <XCircle className="w-5 h-5 flex-shrink-0" />
+          <p>{error}</p>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Table Section */}
@@ -165,6 +194,11 @@ export default function BookingsPage() {
             </div>
           )}
         </div>
+      </div>
+      <div className="mt-8 pt-8 border-t border-slate-100">
+        <p className="text-[10px] text-slate-300 font-mono">
+          Debug: {import.meta.env.VITE_SUPABASE_URL}
+        </p>
       </div>
     </div>
   );

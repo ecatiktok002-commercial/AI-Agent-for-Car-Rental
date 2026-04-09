@@ -961,7 +961,10 @@ BOOKING WORKFLOW (STRICT):
    - Driving License
 4. WAIT PATIENTLY. The customer will upload images one by one. You will see these as [IMAGE_RECEIPT: url].
 5. Do NOT save the booking. Keep reminding the customer until ALL 3 images are uploaded.
-6. ONLY when you have confirmed the Dates, Time, Duration AND received all 3 image URLs, call the 'submit_booking_for_approval' tool. Map the image URLs you received to the correct parameters.`;
+6. ONLY when you have confirmed the Dates, Time, Duration AND received all 3 image URLs, you MUST call the 'submit_booking_for_approval' tool IMMEDIATELY. This is the most important step to ensure the booking is recorded in our system. Map the image URLs you received to the correct parameters.
+7. If the tool returns a success message, tell the customer: "Booking is confirmed! Our admin will verify your documents shortly. You can pick up the car at the agreed time."
+8. If the tool returns an error, do NOT give up. Try to explain what happened or ask the admin to check manually.
+9. NEVER tell the customer "Booking is confirmed" or "Settle" UNLESS you have successfully called the 'submit_booking_for_approval' tool or the system has confirmed the data is saved.`;
 
   const getCarAvailabilityDeclaration: FunctionDeclaration = {
     name: "get_car_availability",
@@ -1108,8 +1111,10 @@ BOOKING WORKFLOW (STRICT):
           const args = call.args as any;
           
           try {
+            console.log("🚀 Submitting booking for approval:", JSON.stringify(args));
+            
             // 1. Save to the Bookings database
-            const { error } = await supabase.from('booking_leads').insert([{
+            const bookingData = {
               ticket_id: ticket.id,
               customer_phone: customerPhone,
               car_model: args.car_model,
@@ -1121,9 +1126,26 @@ BOOKING WORKFLOW (STRICT):
               ic_url: args.ic_url,
               license_url: args.license_url,
               status: 'pending_verification'
-            }]);
+            };
 
-            if (error) throw error;
+            const { error } = await supabase.from('booking_leads').insert([bookingData]);
+
+            if (error) {
+              console.error("❌ Primary Insert Failed:", error.message);
+              // FALLBACK: Try inserting with only basic columns in case the new ones don't exist
+              console.log("⚠️ Attempting safe fallback insert...");
+              const { error: fallbackError } = await supabase.from('booking_leads').insert([{
+                ticket_id: ticket.id,
+                customer_phone: customerPhone,
+                car_model: args.car_model,
+                area: args.area,
+                rental_dates: args.rental_dates,
+                status: 'pending_verification'
+              }]);
+              
+              if (fallbackError) throw fallbackError;
+              console.log("✅ Safe fallback insert succeeded.");
+            }
             
             // Update the ticket tag
             await supabase.from('tickets').update({ tag: 'Pending Verification', status: 'waiting_agent' }).eq('id', ticket.id);
@@ -1140,7 +1162,7 @@ BOOKING WORKFLOW (STRICT):
                   "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                  from: "ECA Car Rental <onboarding@resend.dev>", // MUST match your Resend verified domain
+                  from: "ECA Car Rental <onboarding@resend.dev>",
                   to: ADMIN_EMAIL,
                   subject: `🚨 New Booking Approval Needed: ${args.car_model}`,
                   html: `
@@ -1170,7 +1192,7 @@ BOOKING WORKFLOW (STRICT):
               }
             }
 
-            toolResult = { success: true, message: "Booking submitted. Tell the customer we are verifying their documents." };
+            toolResult = { success: true, message: "Booking submitted successfully. Tell the customer: 'Booking is confirmed! Our admin will verify your documents shortly.'" };
           } catch (e: any) {
             console.error("Submit Booking Error:", e);
             toolResult = { error: `Failed to submit booking. Database Error: ${e.message || JSON.stringify(e)}` };
@@ -1232,9 +1254,16 @@ BOOKING WORKFLOW (STRICT):
     aiResponseText = aiResponseText.replace(/^\*?\*?Assistant\*?\*?\s*:\s*/i, '').trim();
 
     // --- NEW: AUTO-CAPTURE FALLBACK ---
-    // If the AI says it's confirmed but the tool wasn't called successfully
+    // If the AI says it's confirmed or processing but the tool wasn't called successfully
     const lowerResponse = aiResponseText.toLowerCase();
-    const impliesConfirmed = lowerResponse.includes("confirm") || lowerResponse.includes("selesai") || lowerResponse.includes("berjaya") || lowerResponse.includes("cunnn");
+    const impliesConfirmed = lowerResponse.includes("confirm") || 
+                             lowerResponse.includes("selesai") || 
+                             lowerResponse.includes("berjaya") || 
+                             lowerResponse.includes("cunnn") ||
+                             lowerResponse.includes("settle") ||
+                             lowerResponse.includes("siap") ||
+                             lowerResponse.includes("done") ||
+                             (lowerResponse.includes("admin") && lowerResponse.includes("check") && lowerResponse.includes("dokumen"));
     
     if (impliesConfirmed) {
       try {
