@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { supabase } from '../supabase';
-import { CheckCircle2, XCircle, FileText, Clock, Calendar, MapPin, ExternalLink, User, CreditCard, FileCheck } from 'lucide-react';
+import { CheckCircle2, XCircle, FileText, Clock, Calendar, MapPin, ExternalLink, User, CreditCard } from 'lucide-react';
 import { Badge } from '../components/Badge';
 import { BookingLead } from '../types';
 
@@ -137,7 +137,6 @@ export default function BookingsPage() {
                     <DocumentLink label="Payment Receipt" url={selectedLead.receipt_url} icon={<CreditCard className="w-4 h-4" />} />
                     <DocumentLink label="Identity Card (IC)" url={selectedLead.ic_url} icon={<User className="w-4 h-4" />} />
                     <DocumentLink label="Driving License" url={selectedLead.license_url} icon={<FileText className="w-4 h-4" />} />
-                    <DocumentLink label="Utility Bill" url={selectedLead.utility_bill_url} icon={<FileCheck className="w-4 h-4" />} />
                   </div>
                 </div>
               </div>

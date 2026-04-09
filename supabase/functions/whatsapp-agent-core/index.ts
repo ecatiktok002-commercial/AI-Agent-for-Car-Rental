@@ -955,14 +955,13 @@ Reply to the customer message exactly as ${agentName} would.`;
 BOOKING WORKFLOW (STRICT):
 1. When a customer agrees to rent a car, you MUST collect: Rent Date, Pickup Time, and Duration (days).
 2. Once you have the dates and time, tell them the total price and ask them to make the payment. You MUST include "[SEND_QR]" in your message.
-3. You MUST ask the customer to upload 4 required documents:
+3. You MUST ask the customer to upload 3 required documents:
    - Payment Receipt
    - Identity Card (IC)
    - Driving License
-   - Utility Bill (Electric/Water bill)
 4. WAIT PATIENTLY. The customer will upload images one by one. You will see these as [IMAGE_RECEIPT: url].
-5. Do NOT save the booking. Keep reminding the customer until ALL 4 images are uploaded.
-6. ONLY when you have confirmed the Dates, Time, Duration AND received all 4 image URLs, call the 'submit_booking_for_approval' tool. Map the image URLs you received to the correct parameters.`;
+5. Do NOT save the booking. Keep reminding the customer until ALL 3 images are uploaded.
+6. ONLY when you have confirmed the Dates, Time, Duration AND received all 3 image URLs, call the 'submit_booking_for_approval' tool. Map the image URLs you received to the correct parameters.`;
 
   const getCarAvailabilityDeclaration: FunctionDeclaration = {
     name: "get_car_availability",
@@ -990,7 +989,7 @@ BOOKING WORKFLOW (STRICT):
 
   const submitBookingForApprovalDeclaration: FunctionDeclaration = {
     name: "submit_booking_for_approval",
-    description: "Submit the complete booking details and all 4 required document URLs for admin approval.",
+    description: "Submit the complete booking details and all 3 required document URLs for admin approval.",
     parameters: {
       type: Type.OBJECT,
       properties: {
@@ -1001,11 +1000,10 @@ BOOKING WORKFLOW (STRICT):
         duration_days: { type: Type.NUMBER, description: "Total duration of rent in days." },
         receipt_url: { type: Type.STRING, description: "URL of the payment receipt image." },
         ic_url: { type: Type.STRING, description: "URL of the IC image." },
-        license_url: { type: Type.STRING, description: "URL of the driving license image." },
-        utility_bill_url: { type: Type.STRING, description: "URL of the electric/utility bill image." }
+        license_url: { type: Type.STRING, description: "URL of the driving license image." }
       },
       // By making them ALL required, Gemini will refuse to run the tool until it has them all.
-      required: ["car_model", "area", "rental_dates", "pickup_time", "duration_days", "receipt_url", "ic_url", "license_url", "utility_bill_url"],
+      required: ["car_model", "area", "rental_dates", "pickup_time", "duration_days", "receipt_url", "ic_url", "license_url"],
     },
   };
 
@@ -1122,7 +1120,6 @@ BOOKING WORKFLOW (STRICT):
               receipt_url: args.receipt_url,
               ic_url: args.ic_url,
               license_url: args.license_url,
-              utility_bill_url: args.utility_bill_url,
               status: 'pending_verification'
             }]);
 
@@ -1160,7 +1157,6 @@ BOOKING WORKFLOW (STRICT):
                         <li><a href="${args.receipt_url}">View Payment Receipt</a></li>
                         <li><a href="${args.ic_url}">View IC</a></li>
                         <li><a href="${args.license_url}">View Driving License</a></li>
-                        <li><a href="${args.utility_bill_url}">View Utility Bill</a></li>
                       </ul>
                       <br/>
                       <p style="color: #666; font-size: 14px;">Please log in to your Helpdesk Dashboard to approve (✅) or reject (❌) this booking.</p>

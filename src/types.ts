@@ -90,7 +90,6 @@ export interface BookingLead {
   receipt_url?: string;
   ic_url?: string;
   license_url?: string;
-  utility_bill_url?: string;
   status: 'pending_verification' | 'confirmed' | 'rejected';
   created_at: string;
   tickets?: {
