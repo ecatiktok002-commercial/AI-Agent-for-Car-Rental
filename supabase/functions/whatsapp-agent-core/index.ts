@@ -952,19 +952,18 @@ Reply to the customer message exactly as ${agentName} would.`;
   const todayDate = new Date().toISOString().split('T')[0];
   const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.
 
-BOOKING WORKFLOW (STRICT):
-1. When a customer agrees to rent a car, you MUST collect: Rent Date, Pickup Time, and Duration (days).
-2. Once you have the dates and time, tell them the total price and ask them to make the payment. You MUST include "[SEND_QR]" in your message.
-3. You MUST ask the customer to upload 3 required documents:
-   - Payment Receipt
-   - Identity Card (IC)
-   - Driving License
-4. WAIT PATIENTLY. The customer will upload images one by one. You will see these as [IMAGE_RECEIPT: url].
-5. Do NOT save the booking. Keep reminding the customer until ALL 3 images are uploaded.
-6. ONLY when you have confirmed the Dates, Time, Duration AND received all 3 image URLs, you MUST call the 'submit_booking_for_approval' tool IMMEDIATELY. This is the most important step to ensure the booking is recorded in our system. Map the image URLs you received to the correct parameters.
-7. If the tool returns a success message, tell the customer: "Booking is confirmed! Our admin will verify your documents shortly. You can pick up the car at the agreed time."
-8. If the tool returns an error, do NOT give up. Try to explain what happened or ask the admin to check manually.
-9. NEVER tell the customer "Booking is confirmed" or "Settle" UNLESS you have successfully called the 'submit_booking_for_approval' tool or the system has confirmed the data is saved.`;
+BOOKING WORKFLOW RULE:
+When a customer agrees to book a car, you MUST follow these exact steps in order:
+1. Send the Order Summary using EXACTLY this format:
+   Vehicle: [Model]
+   Pickup Date: [Date]
+   Pickup Time: [Time]
+   Price: [Price/day]
+   Duration: [Number] days
+2. In the SAME message, instruct the customer to make the payment and upload 3 items: IC, Driving License, and Payment Receipt. You MUST include the exact text "[SEND_QR]" so the system attaches the QR code.
+3. Wait for the customer to upload the documents. (Documents will appear in your prompt as [IMAGE_RECEIPT: url] or [DOCUMENT_RECEIPT: url]).
+4. Once you see the documents AND the customer confirms (e.g., "done", "dah", "confirm", "jadi"), you MUST call the 'save_booking_lead' tool with the details from the summary.
+5. After the tool succeeds, reply to the customer confirming the booking is secured and that a human agent will verify the documents shortly. Reply in your assigned persona.`;
 
   const getCarAvailabilityDeclaration: FunctionDeclaration = {
     name: "get_car_availability",
@@ -990,23 +989,19 @@ BOOKING WORKFLOW (STRICT):
     description: "Get a list of all car models available for rent in the company fleet.",
   };
 
-  const submitBookingForApprovalDeclaration: FunctionDeclaration = {
-    name: "submit_booking_for_approval",
-    description: "Submit the complete booking details and all 3 required document URLs for admin approval.",
+  const saveBookingLeadDeclaration: FunctionDeclaration = {
+    name: "save_booking_lead",
+    description: "Save the complete booking details after documents are received.",
     parameters: {
       type: Type.OBJECT,
       properties: {
-        car_model: { type: Type.STRING, description: "The car model they are booking." },
-        area: { type: Type.STRING, description: "Local or Outstation." },
-        rental_dates: { type: Type.STRING, description: "The dates they are renting." },
-        pickup_time: { type: Type.STRING, description: "The agreed pickup time." },
-        duration_days: { type: Type.NUMBER, description: "Total duration of rent in days." },
-        receipt_url: { type: Type.STRING, description: "URL of the payment receipt image." },
-        ic_url: { type: Type.STRING, description: "URL of the IC image." },
-        license_url: { type: Type.STRING, description: "URL of the driving license image." }
+        vehicle_model: { type: Type.STRING, description: "The vehicle model they are booking." },
+        pickup_date: { type: Type.STRING, description: "The date of pickup." },
+        pickup_time: { type: Type.STRING, description: "The time of pickup." },
+        price: { type: Type.STRING, description: "The price of the rental." },
+        duration: { type: Type.STRING, description: "The duration of the rental." }
       },
-      // By making them ALL required, Gemini will refuse to run the tool until it has them all.
-      required: ["car_model", "area", "rental_dates", "pickup_time", "duration_days", "receipt_url", "ic_url", "license_url"],
+      required: ["vehicle_model", "pickup_date", "pickup_time", "price", "duration"],
     },
   };
 
@@ -1044,7 +1039,7 @@ BOOKING WORKFLOW (STRICT):
         temperature: 0.7,
         topK: 40,
         topP: 0.95,
-        tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, submitBookingForApprovalDeclaration] }],
+        tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
       }
     });
 
@@ -1106,49 +1101,34 @@ BOOKING WORKFLOW (STRICT):
           } else {
             toolResult = { error: "External Supabase keys not configured." };
           }
-        } else if (call.name === "submit_booking_for_approval") {
+        } else if (call.name === "save_booking_lead") {
           toolCalled = true;
           const args = call.args as any;
           
           try {
-            console.log("🚀 Submitting booking for approval:", JSON.stringify(args));
+            console.log("🚀 Saving booking lead:", JSON.stringify(args));
             
             // 1. Save to the Bookings database
             const bookingData = {
               ticket_id: ticket.id,
               customer_phone: customerPhone,
-              car_model: args.car_model,
-              area: args.area,
-              rental_dates: args.rental_dates,
+              vehicle_model: args.vehicle_model,
+              pickup_date: args.pickup_date,
               pickup_time: args.pickup_time,
-              duration_days: parseInt(args.duration_days) || null,
-              receipt_url: args.receipt_url,
-              ic_url: args.ic_url,
-              license_url: args.license_url,
-              status: 'pending_verification'
+              price: args.price,
+              duration: args.duration,
+              status: 'Pending'
             };
 
             const { error } = await supabase.from('booking_leads').insert([bookingData]);
 
             if (error) {
-              console.error("❌ Primary Insert Failed:", error.message);
-              // FALLBACK: Try inserting with only basic columns in case the new ones don't exist
-              console.log("⚠️ Attempting safe fallback insert...");
-              const { error: fallbackError } = await supabase.from('booking_leads').insert([{
-                ticket_id: ticket.id,
-                customer_phone: customerPhone,
-                car_model: args.car_model,
-                area: args.area,
-                rental_dates: args.rental_dates,
-                status: 'pending_verification'
-              }]);
-              
-              if (fallbackError) throw fallbackError;
-              console.log("✅ Safe fallback insert succeeded.");
+              console.error("❌ Insert Failed:", error.message);
+              throw error;
             }
             
             // Update the ticket tag
-            await supabase.from('tickets').update({ tag: 'Pending Verification', status: 'waiting_agent' }).eq('id', ticket.id);
+            await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticket.id);
 
             // 2. Send Email Notification to Admin
             const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -1164,38 +1144,26 @@ BOOKING WORKFLOW (STRICT):
                 body: JSON.stringify({
                   from: "ECA Car Rental <onboarding@resend.dev>",
                   to: ADMIN_EMAIL,
-                  subject: `🚨 New Booking Approval Needed: ${args.car_model}`,
+                  subject: `🚨 New Booking: ${args.vehicle_model}`,
                   html: `
                     <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-                      <h2>New Booking Requires Approval</h2>
+                      <h2>New Booking Received</h2>
                       <p><strong>Customer Phone:</strong> ${customerPhone}</p>
-                      <p><strong>Car:</strong> ${args.car_model}</p>
-                      <p><strong>Dates:</strong> ${args.rental_dates} (${args.duration_days} Days)</p>
-                      <p><strong>Pickup Time:</strong> ${args.pickup_time}</p>
-                      <p><strong>Area:</strong> ${args.area}</p>
-                      <br/>
-                      <h3>Documents Submitted:</h3>
-                      <ul>
-                        <li><a href="${args.receipt_url}">View Payment Receipt</a></li>
-                        <li><a href="${args.ic_url}">View IC</a></li>
-                        <li><a href="${args.license_url}">View Driving License</a></li>
-                      </ul>
-                      <br/>
-                      <p style="color: #666; font-size: 14px;">Please log in to your Helpdesk Dashboard to approve (✅) or reject (❌) this booking.</p>
+                      <p><strong>Vehicle:</strong> ${args.vehicle_model}</p>
+                      <p><strong>Pickup:</strong> ${args.pickup_date} @ ${args.pickup_time}</p>
+                      <p><strong>Price:</strong> ${args.price}</p>
+                      <p><strong>Duration:</strong> ${args.duration}</p>
                     </div>
                   `
                 })
               });
-
-              if (!emailResponse.ok) {
-                console.error("❌ Resend API Error:", await emailResponse.text());
-              }
+              console.log("📧 Email Status:", emailResponse.status);
             }
 
-            toolResult = { success: true, message: "Booking submitted successfully. Tell the customer: 'Booking is confirmed! Our admin will verify your documents shortly.'" };
-          } catch (e: any) {
-            console.error("Submit Booking Error:", e);
-            toolResult = { error: `Failed to submit booking. Database Error: ${e.message || JSON.stringify(e)}` };
+            toolResult = { success: true, message: "Booking saved successfully. Admin will verify documents." };
+          } catch (err: any) {
+            console.error("❌ Booking Save Error:", err.message);
+            toolResult = { error: err.message };
           }
         }
 
@@ -1277,14 +1245,14 @@ BOOKING WORKFLOW (STRICT):
         if (!existingLead) {
           console.log("Auto-capturing booking details from conversation...");
           // Extract details using a quick Gemini call
-          const extractionPrompt = `Extract the car model, area, and rental dates from this conversation history. Return ONLY a valid JSON object with keys: "car_model", "area", "rental_dates". If you cannot find a value, use "Unknown". Do not include markdown formatting. Conversation: ${JSON.stringify(contents)}`;
+          const extractionPrompt = `Extract the vehicle model, pickup date, pickup time, price, and duration from this conversation history. Return ONLY a valid JSON object with keys: "vehicle_model", "pickup_date", "pickup_time", "price", "duration". If you cannot find a value, use "Unknown". Do not include markdown formatting. Conversation: ${JSON.stringify(contents)}`;
           
           const extraction = await ai.models.generateContent({
             model: "gemini-1.5-flash",
             contents: extractionPrompt
           });
           
-          let details = { car_model: "Unknown", area: "Unknown", rental_dates: "Unknown" };
+          let details = { vehicle_model: "Unknown", pickup_date: "Unknown", pickup_time: "Unknown", price: "Unknown", duration: "Unknown" };
           try {
             const jsonStr = extraction.text?.replace(/```json/g, '').replace(/```/g, '').trim() || "{}";
             details = JSON.parse(jsonStr);
@@ -1296,14 +1264,16 @@ BOOKING WORKFLOW (STRICT):
           await supabase.from('booking_leads').insert([{
             ticket_id: ticket.id,
             customer_phone: customerPhone,
-            car_model: details.car_model || "Auto-captured",
-            area: details.area || "Auto-captured",
-            rental_dates: details.rental_dates || "Auto-captured",
-            status: 'pending_verification'
+            vehicle_model: details.vehicle_model || "Auto-captured",
+            pickup_date: details.pickup_date || "Auto-captured",
+            pickup_time: details.pickup_time || "Auto-captured",
+            price: details.price || "Auto-captured",
+            duration: details.duration || "Auto-captured",
+            status: 'Pending'
           }]);
           
           // Update ticket tag
-          await supabase.from('tickets').update({ tag: 'Pending Verification', status: 'waiting_agent' }).eq('id', ticket.id);
+          await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticket.id);
         }
       } catch (fallbackErr) {
         console.error("Auto-capture fallback failed:", fallbackErr);

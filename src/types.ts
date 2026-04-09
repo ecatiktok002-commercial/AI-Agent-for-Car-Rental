@@ -80,22 +80,17 @@ export interface KnowledgeFact {
 
 export interface BookingLead {
   id: string;
-  ticket_id: string;
+  ticket_id?: string;
   customer_phone: string;
-  car_model: string;
-  area: string;
-  rental_dates: string;
-  pickup_time?: string;
-  duration_days?: number;
-  receipt_url?: string;
-  ic_url?: string;
-  license_url?: string;
-  status: 'pending_verification' | 'confirmed' | 'rejected';
+  vehicle_model: string;
+  pickup_date: string;
+  pickup_time: string;
+  price: string;
+  duration: string;
+  status: 'Pending' | 'Done';
   created_at: string;
   tickets?: {
-    customer?: {
-      name: string;
-      phone_number: string;
-    }
+    customer_name?: string;
+    phone_number?: string;
   }
 }
