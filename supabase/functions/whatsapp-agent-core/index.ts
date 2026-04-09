@@ -953,14 +953,15 @@ Reply to the customer message exactly as ${agentName} would.`;
   const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.
 
 BOOKING WORKFLOW RULE:
-When a customer agrees to book a car, you MUST follow these exact steps in order:
-1. Send the Order Summary using EXACTLY this format:
-   Vehicle: [Model]
-   Pickup Date: [Date]
-   Pickup Time: [Time]
-   Price: [Price/day]
-   Duration: [Number] days
-2. In the SAME message, instruct the customer to make the payment and upload 3 items: IC, Driving License, and Payment Receipt. You MUST include the exact text "[SEND_QR]" so the system attaches the QR code.
+1. AVAILABILITY CHECK: If a customer asks if a car is available ("Ada kosong tak?", "Available?", etc.) or asks for a list of cars, you MUST use the 'get_car_availability' or 'get_all_cars' tools.
+2. When a customer agrees to book a car, you MUST follow these exact steps in order:
+   a. Send the Order Summary using EXACTLY this format:
+      Vehicle: [Model]
+      Pickup Date: [Date]
+      Pickup Time: [Time]
+      Price: [Price/day]
+      Duration: [Number] days
+   b. In the SAME message, instruct the customer to make the payment and upload 3 items: IC, Driving License, and Payment Receipt. You MUST include the exact text "[SEND_QR]" so the system attaches the QR code.
 3. Wait for the customer to upload the documents. (Documents will appear in your prompt as [IMAGE_RECEIPT: url] or [DOCUMENT_RECEIPT: url]).
 4. Once you see the documents AND the customer confirms (e.g., "done", "dah", "confirm", "jadi"), you MUST call the 'save_booking_lead' tool with the details from the summary.
 5. After the tool succeeds, reply to the customer confirming the booking is secured and that a human agent will verify the documents shortly. Reply in your assigned persona.`;
