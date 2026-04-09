@@ -12,6 +12,7 @@ export default function BookingsPage() {
   useEffect(() => {
     const fetchLeads = async () => {
       console.log("Fetching booking leads...");
+      // Simplified fetch to avoid ambiguous relationship error
       const { data, error: fetchError } = await supabase
         .from('booking_leads')
         .select('*')
@@ -21,11 +22,13 @@ export default function BookingsPage() {
         console.error("Error fetching leads:", fetchError);
         if (fetchError.code === 'PGRST116' || fetchError.message.includes('does not exist')) {
           setError("The 'booking_leads' table is missing. Please run the SQL command provided in the chat to create it.");
+        } else if (fetchError.code === '42501') {
+          setError("Permission Denied: You need to enable access for the 'anon' role on the 'booking_leads' table. Please run the SQL command provided in the chat.");
         } else {
           setError(fetchError.message);
         }
       } else {
-        console.log("Leads fetched:", data?.length);
+        console.log("Leads fetched successfully:", data?.length);
         setLeads(data || []);
         setError(null);
       }
@@ -103,8 +106,8 @@ export default function BookingsPage() {
                         <User className="w-4 h-4" />
                       </div>
                       <div>
-                        <p className="text-sm font-bold text-slate-900">{lead.tickets?.customer?.name || lead.customer_phone}</p>
-                        <p className="text-xs text-slate-500">{lead.customer_phone}</p>
+                        <p className="text-sm font-bold text-slate-900">{lead.customer_phone}</p>
+                        <p className="text-xs text-slate-500">Booking ID: {lead.id.slice(0, 8)}</p>
                       </div>
                     </div>
                   </td>
