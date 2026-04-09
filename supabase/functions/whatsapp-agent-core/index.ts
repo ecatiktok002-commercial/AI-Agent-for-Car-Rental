@@ -497,13 +497,6 @@ serve(async (req) => {
           if (from === ADMIN_PHONE && text && text.toUpperCase().startsWith("APPROVE ")) {
             const customerPhoneToApprove = text.split(" ")[1].trim(); 
             
-            // UPDATE booking_leads status to confirmed
-            await supabase
-              .from("booking_leads")
-              .update({ status: "confirmed" })
-              .eq("customer_phone", customerPhoneToApprove)
-              .eq("status", "pending_verification");
-
             // NEW APPROVAL MESSAGE (No longer asks for IC because AI already got it)
             const approvalMsg = "✅ *Booking Confirmed!*\n\nTerima kasih boss! Payment and dokumen semua dah lepas verify. payment ca mintak? Booking awak dah berjaya di-lock. Jumpa masa hari pickup nanti! 🎉";
             await sendWhatsAppMessage(customerPhoneToApprove, approvalMsg);
@@ -516,14 +509,6 @@ serve(async (req) => {
           // If the message is from the Admin and starts with REJECT
           if (from === ADMIN_PHONE && text && text.toUpperCase().startsWith("REJECT ")) {
             const customerPhoneToReject = text.split(" ")[1].trim();
-            
-            // UPDATE booking_leads status to rejected
-            await supabase
-              .from("booking_leads")
-              .update({ status: "rejected" })
-              .eq("customer_phone", customerPhoneToReject)
-              .eq("status", "pending_verification");
-
             await sendWhatsAppMessage(customerPhoneToReject, "❌ *Payment Failed*\n\nMaaf boss, admin check payment tak masuk lagi. Boleh try check balik bank history atau resit tak?");
             await sendWhatsAppMessage(ADMIN_PHONE, `❌ Rejection sent to ${customerPhoneToReject}.`);
             return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
@@ -716,11 +701,11 @@ serve(async (req) => {
                   }
                 }
 
-                // Fetch last 10 messages for context from this customer (across all their tickets)
+                // Fetch last 10 messages for context
                 const { data: history } = await supabase
                   .from("messages")
-                  .select("sender_type, message_text, created_at, tickets!inner(customer_id)")
-                  .eq("tickets.customer_id", customer.id)
+                  .select("sender_type, message_text, created_at")
+                  .eq("ticket_id", ticket.id)
                   .order("created_at", { ascending: false })
                   .limit(10);
 
@@ -1192,7 +1177,7 @@ BOOKING WORKFLOW (STRICT):
             toolResult = { success: true, message: "Booking submitted. Tell the customer we are verifying their documents." };
           } catch (e: any) {
             console.error("Submit Booking Error:", e);
-            toolResult = { error: "Failed to submit booking." };
+            toolResult = { error: `Failed to submit booking. Database Error: ${e.message || JSON.stringify(e)}` };
           }
         }
 
@@ -1249,6 +1234,57 @@ BOOKING WORKFLOW (STRICT):
       aiResponseText = aiResponseText.replace(prefixRegex, '').trim();
     }
     aiResponseText = aiResponseText.replace(/^\*?\*?Assistant\*?\*?\s*:\s*/i, '').trim();
+
+    // --- NEW: AUTO-CAPTURE FALLBACK ---
+    // If the AI says it's confirmed but the tool wasn't called successfully
+    const lowerResponse = aiResponseText.toLowerCase();
+    const impliesConfirmed = lowerResponse.includes("confirm") || lowerResponse.includes("selesai") || lowerResponse.includes("berjaya") || lowerResponse.includes("cunnn");
+    
+    if (impliesConfirmed) {
+      try {
+        // Check if a lead already exists for this ticket to avoid duplicates
+        const { data: existingLead } = await supabase
+          .from('booking_leads')
+          .select('id')
+          .eq('ticket_id', ticket.id)
+          .maybeSingle();
+
+        if (!existingLead) {
+          console.log("Auto-capturing booking details from conversation...");
+          // Extract details using a quick Gemini call
+          const extractionPrompt = `Extract the car model, area, and rental dates from this conversation history. Return ONLY a valid JSON object with keys: "car_model", "area", "rental_dates". If you cannot find a value, use "Unknown". Do not include markdown formatting. Conversation: ${JSON.stringify(contents)}`;
+          
+          const extraction = await ai.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: extractionPrompt
+          });
+          
+          let details = { car_model: "Unknown", area: "Unknown", rental_dates: "Unknown" };
+          try {
+            const jsonStr = extraction.text?.replace(/```json/g, '').replace(/```/g, '').trim() || "{}";
+            details = JSON.parse(jsonStr);
+          } catch (parseErr) {
+            console.error("Failed to parse extraction JSON:", parseErr);
+          }
+
+          // Insert using ONLY the safe original columns to prevent database crashes
+          await supabase.from('booking_leads').insert([{
+            ticket_id: ticket.id,
+            customer_phone: customerPhone,
+            car_model: details.car_model || "Auto-captured",
+            area: details.area || "Auto-captured",
+            rental_dates: details.rental_dates || "Auto-captured",
+            status: 'pending_verification'
+          }]);
+          
+          // Update ticket tag
+          await supabase.from('tickets').update({ tag: 'Pending Verification', status: 'waiting_agent' }).eq('id', ticket.id);
+        }
+      } catch (fallbackErr) {
+        console.error("Auto-capture fallback failed:", fallbackErr);
+      }
+    }
+    // --- END AUTO-CAPTURE FALLBACK ---
 
     return aiResponseText;
   } catch (error: any) {
