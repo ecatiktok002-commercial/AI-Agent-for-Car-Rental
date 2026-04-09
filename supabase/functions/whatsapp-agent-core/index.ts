@@ -400,7 +400,7 @@ serve(async (req) => {
         const { message, personality_instructions, agent_name } = body;
         
         try {
-          const response = await generateAIResponse(message, "Test Customer", personality_instructions, agent_name);
+          const response = await generateAIResponse(message, "Test Customer", "Test Phone", personality_instructions, agent_name);
           return new Response(JSON.stringify({ success: true, response }), {
             headers: { ...corsHeaders, "Content-Type": "application/json" },
           });
@@ -720,7 +720,7 @@ serve(async (req) => {
                   ? keywordSettings.value.split(',').map((k: string) => k.trim().toLowerCase()).filter((k: string) => k.length > 0)
                   : [];
 
-                const aiResponse = await generateAIResponse(text, customerName, personaInstructions, agentName, history?.reverse().slice(0, -1), referenceSnippets);
+                const aiResponse = await generateAIResponse(text, customerName, from, personaInstructions, agentName, history?.reverse().slice(0, -1), referenceSnippets);
                 
                 // Check for handover intent or AI-triggered escalation
                 const defaultKeywords = ["human", "agent", "person", "staff", "speak to someone", "talk to someone", "orang", "staf", "admin", "bantuan"];
@@ -826,7 +826,7 @@ async function sendWhatsAppMessage(to: string, text: string) {
 }
 
 // Helper: Generate AI Response using Gemini
-async function generateAIResponse(userInput: string, customerName: string, customPersona?: string, agentName?: string, history: any[] = [], referenceSnippets?: string) {
+async function generateAIResponse(userInput: string, customerName: string, customerPhone: string, customPersona?: string, agentName?: string, history: any[] = [], referenceSnippets?: string) {
   // Initialize GoogleGenAI
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY || '' });
   
@@ -950,7 +950,7 @@ Reply to the customer message exactly as ${agentName} would.`;
 
   // Add a final instruction to the basePrompt to ensure completion
   const todayDate = new Date().toISOString().split('T')[0];
-  const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.\n\nPAYMENT RULE: Payment can ONLY be made via QR code. Do NOT provide bank account numbers (like Maybank). When requesting payment, you MUST include the exact text "[SEND_QR]" anywhere in your message. The system will automatically attach the QR image.`;
+  const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.\n\nBOOKING WORKFLOW (STRICT):\n1. When a customer agrees to rent a car for specific dates, tell them the total price and ask them to make the payment.\n2. You MUST include the exact text "[SEND_QR]" in your message asking for payment so the system attaches the QR code.\n3. Ask them to upload the payment receipt and their IC/License.\n4. Wait for them to upload the receipt. DO NOT save the booking before the receipt is uploaded.\n5. Once they upload the receipt (image), call the 'submit_booking_for_approval' tool to save the booking and email the Admin.`;
 
   const getCarAvailabilityDeclaration: FunctionDeclaration = {
     name: "get_car_availability",
@@ -976,32 +976,18 @@ Reply to the customer message exactly as ${agentName} would.`;
     description: "Get a list of all car models available for rent in the company fleet.",
   };
 
-  const saveBookingLeadDeclaration: FunctionDeclaration = {
-    name: "save_booking_lead",
-    description: "Save the customer's booking details to the database once they have agreed to the price and are sending documents.",
+  const submitBookingForApprovalDeclaration: FunctionDeclaration = {
+    name: "submit_booking_for_approval",
+    description: "Submit the booking details and payment receipt for admin approval.",
     parameters: {
       type: Type.OBJECT,
       properties: {
         car_model: { type: Type.STRING, description: "The car model they are booking." },
         area: { type: Type.STRING, description: "Local or Outstation." },
-        rental_dates: { type: Type.STRING, description: "The dates they are renting." }
-      },
-      required: ["car_model", "area", "rental_dates"],
-    },
-  };
-
-  const requestHumanApprovalDeclaration: FunctionDeclaration = {
-    name: "request_human_approval",
-    description: "Send the customer's receipt to the human admin for manual bank verification.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        receipt_url: { type: Type.STRING, description: "The https URL of the receipt image." },
-        car_details: { type: Type.STRING, description: "The car model they are booking." },
         rental_dates: { type: Type.STRING, description: "The dates they are renting." },
-        pickup_time: { type: Type.STRING, description: "The time they will pick up the car." }
+        receipt_url: { type: Type.STRING, description: "The https URL of the receipt image uploaded by the customer." }
       },
-      required: ["receipt_url", "car_details", "rental_dates", "pickup_time"],
+      required: ["car_model", "area", "rental_dates", "receipt_url"],
     },
   };
 
@@ -1019,7 +1005,7 @@ Reply to the customer message exactly as ${agentName} would.`;
         temperature: 0.7,
         topK: 40,
         topP: 0.95,
-        tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration] }],
+        tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, submitBookingForApprovalDeclaration] }],
       }
     });
 
@@ -1081,73 +1067,64 @@ Reply to the customer message exactly as ${agentName} would.`;
           } else {
             toolResult = { error: "External Supabase keys not configured." };
           }
-        } else if (call.name === "save_booking_lead") {
-          toolCalled = true;
-          const args = call.args as any;
-          try {
-            // Save to the local AI database
-            const { error } = await supabase.from('booking_leads').insert([{
-              ticket_id: ticket.id,
-              customer_phone: customerName, // Or use the 'from' phone number variable
-              car_model: args.car_model,
-              area: args.area,
-              rental_dates: args.rental_dates
-            }]);
-
-            if (error) throw error;
-            
-            // Also update the ticket tag to alert the human agent
-            await supabase.from('tickets').update({ tag: 'Pending Verification', status: 'waiting_agent' }).eq('id', ticket.id);
-
-            toolResult = { success: true, message: "Booking saved. Inform the customer a human will verify documents." };
-          } catch (e: any) {
-            console.error("Save Booking Error:", e);
-            toolResult = { error: "Failed to save booking." };
-          }
-        } else if (call.name === "request_human_approval") {
+        } else if (call.name === "submit_booking_for_approval") {
           toolCalled = true;
           const args = call.args as any;
           
           try {
-            // The dedicated admin number
-            const ADMIN_WHATSAPP_NUMBER = Deno.env.get("ADMIN_PHONE_NUMBER") || "60191234567"; 
+            // 1. Save to the Bookings database so it appears on the Admin Dashboard
+            const { error } = await supabase.from('booking_leads').insert([{
+              ticket_id: ticket.id,
+              customer_phone: customerPhone,
+              car_model: args.car_model,
+              area: args.area,
+              rental_dates: args.rental_dates,
+              status: 'pending_verification'
+            }]);
 
-            const payload = {
-              "messaging_product": "whatsapp",
-              "to": ADMIN_WHATSAPP_NUMBER, 
-              "type": "template",
-              "template": {
-                "name": "admin_booking_alert",
-                "language": { "code": "en" },
-                "components": [
-                  {
-                    "type": "body",
-                    "parameters": [
-                      { "type": "text", "text": from },                      // {{1}} Customer Phone
-                      { "type": "text", "text": args.rental_dates },         // {{2}} Date
-                      { "type": "text", "text": args.car_details },          // {{3}} Details (Car model)
-                      { "type": "text", "text": args.pickup_time },          // {{4}} Pickup time
-                      { "type": "text", "text": args.receipt_url }           // {{5}} Receipt URL
-                    ]
-                  }
-                ]
-              }
-            };
-
-            const url = `https://graph.facebook.com/v17.0/${META_PHONE_ID}/messages`;
-            await fetch(url, {
-              method: "POST",
-              headers: {
-                "Authorization": `Bearer ${META_ACCESS_TOKEN}`,
-                "Content-Type": "application/json",
-              },
-              body: JSON.stringify(payload),
-            });
+            if (error) throw error;
             
-            toolResult = { success: true, message: "Admin notified." };
+            // Update the ticket tag
+            await supabase.from('tickets').update({ tag: 'Pending Verification', status: 'waiting_agent' }).eq('id', ticket.id);
+
+            // 2. Send Email Notification to Admin using Resend API
+            const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+            const ADMIN_EMAIL = Deno.env.get("ADMIN_EMAIL") || "your-email@example.com";
+
+            if (RESEND_API_KEY) {
+              await fetch("https://api.resend.com/emails", {
+                method: "POST",
+                headers: {
+                  "Authorization": `Bearer ${RESEND_API_KEY}`,
+                  "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                  from: "Acme Car Rental <onboarding@resend.dev>", // Change Acme Car Rental to your business name
+                  to: ADMIN_EMAIL,
+                  subject: `🚨 New Booking Approval Needed: ${args.car_model}`,
+                  html: `
+                    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                      <h2>New Booking Requires Approval</h2>
+                      <p><strong>Customer Phone:</strong> ${customerPhone}</p>
+                      <p><strong>Car:</strong> ${args.car_model}</p>
+                      <p><strong>Dates:</strong> ${args.rental_dates}</p>
+                      <p><strong>Area:</strong> ${args.area}</p>
+                      <br/>
+                      <p><a href="${args.receipt_url}" style="padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: bold;">View Payment Receipt</a></p>
+                      <br/>
+                      <p style="color: #666; font-size: 14px;">Please log in to your Helpdesk Dashboard to approve (✅) or reject (❌) this booking.</p>
+                    </div>
+                  `
+                })
+              });
+            } else {
+              console.warn("RESEND_API_KEY not found. Email notification skipped.");
+            }
+
+            toolResult = { success: true, message: "Booking submitted successfully. Tell the customer that an admin is verifying their payment and will confirm shortly." };
           } catch (e: any) {
-            console.error("Failed to notify admin:", e);
-            toolResult = { error: "Failed to notify." };
+            console.error("Submit Booking Error:", e);
+            toolResult = { error: "Failed to submit booking." };
           }
         }
 
@@ -1178,7 +1155,7 @@ Reply to the customer message exactly as ${agentName} would.`;
             temperature: 0.7,
             topK: 40,
             topP: 0.95,
-            tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration] }],
+            tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, submitBookingForApprovalDeclaration] }],
           }
         });
       } else {
