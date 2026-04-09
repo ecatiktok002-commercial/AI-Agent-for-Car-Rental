@@ -950,7 +950,19 @@ Reply to the customer message exactly as ${agentName} would.`;
 
   // Add a final instruction to the basePrompt to ensure completion
   const todayDate = new Date().toISOString().split('T')[0];
-  const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.\n\nBOOKING WORKFLOW (STRICT):\n1. When a customer agrees to rent a car for specific dates, tell them the total price and ask them to make the payment.\n2. You MUST include the exact text "[SEND_QR]" in your message asking for payment so the system attaches the QR code.\n3. Ask them to upload the payment receipt and their IC/License.\n4. Wait for them to upload the receipt. DO NOT save the booking before the receipt is uploaded.\n5. Once they upload the receipt (image), call the 'submit_booking_for_approval' tool to save the booking and email the Admin.`;
+  const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.
+
+BOOKING WORKFLOW (STRICT):
+1. When a customer agrees to rent a car, you MUST collect: Rent Date, Pickup Time, and Duration (days).
+2. Once you have the dates and time, tell them the total price and ask them to make the payment. You MUST include "[SEND_QR]" in your message.
+3. You MUST ask the customer to upload 4 required documents:
+   - Payment Receipt
+   - Identity Card (IC)
+   - Driving License
+   - Utility Bill (Electric/Water bill)
+4. WAIT PATIENTLY. The customer will upload images one by one. You will see these as [IMAGE_RECEIPT: url].
+5. Do NOT save the booking. Keep reminding the customer until ALL 4 images are uploaded.
+6. ONLY when you have confirmed the Dates, Time, Duration AND received all 4 image URLs, call the 'submit_booking_for_approval' tool. Map the image URLs you received to the correct parameters.`;
 
   const getCarAvailabilityDeclaration: FunctionDeclaration = {
     name: "get_car_availability",
@@ -978,16 +990,22 @@ Reply to the customer message exactly as ${agentName} would.`;
 
   const submitBookingForApprovalDeclaration: FunctionDeclaration = {
     name: "submit_booking_for_approval",
-    description: "Submit the booking details and payment receipt for admin approval.",
+    description: "Submit the complete booking details and all 4 required document URLs for admin approval.",
     parameters: {
       type: Type.OBJECT,
       properties: {
         car_model: { type: Type.STRING, description: "The car model they are booking." },
         area: { type: Type.STRING, description: "Local or Outstation." },
         rental_dates: { type: Type.STRING, description: "The dates they are renting." },
-        receipt_url: { type: Type.STRING, description: "The https URL of the receipt image uploaded by the customer." }
+        pickup_time: { type: Type.STRING, description: "The agreed pickup time." },
+        duration_days: { type: Type.NUMBER, description: "Total duration of rent in days." },
+        receipt_url: { type: Type.STRING, description: "URL of the payment receipt image." },
+        ic_url: { type: Type.STRING, description: "URL of the IC image." },
+        license_url: { type: Type.STRING, description: "URL of the driving license image." },
+        utility_bill_url: { type: Type.STRING, description: "URL of the electric/utility bill image." }
       },
-      required: ["car_model", "area", "rental_dates", "receipt_url"],
+      // By making them ALL required, Gemini will refuse to run the tool until it has them all.
+      required: ["car_model", "area", "rental_dates", "pickup_time", "duration_days", "receipt_url", "ic_url", "license_url", "utility_bill_url"],
     },
   };
 
@@ -1092,13 +1110,19 @@ Reply to the customer message exactly as ${agentName} would.`;
           const args = call.args as any;
           
           try {
-            // 1. Save to the Bookings database so it appears on the Admin Dashboard
+            // 1. Save to the Bookings database
             const { error } = await supabase.from('booking_leads').insert([{
               ticket_id: ticket.id,
               customer_phone: customerPhone,
               car_model: args.car_model,
               area: args.area,
               rental_dates: args.rental_dates,
+              pickup_time: args.pickup_time,
+              duration_days: args.duration_days,
+              receipt_url: args.receipt_url,
+              ic_url: args.ic_url,
+              license_url: args.license_url,
+              utility_bill_url: args.utility_bill_url,
               status: 'pending_verification'
             }]);
 
@@ -1107,19 +1131,19 @@ Reply to the customer message exactly as ${agentName} would.`;
             // Update the ticket tag
             await supabase.from('tickets').update({ tag: 'Pending Verification', status: 'waiting_agent' }).eq('id', ticket.id);
 
-            // 2. Send Email Notification to Admin using Resend API
+            // 2. Send Email Notification to Admin
             const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
             const ADMIN_EMAIL = Deno.env.get("ADMIN_EMAIL") || "your-email@example.com";
 
             if (RESEND_API_KEY) {
-              await fetch("https://api.resend.com/emails", {
+              const emailResponse = await fetch("https://api.resend.com/emails", {
                 method: "POST",
                 headers: {
                   "Authorization": `Bearer ${RESEND_API_KEY}`,
                   "Content-Type": "application/json"
                 },
                 body: JSON.stringify({
-                  from: "Acme Car Rental <onboarding@resend.dev>", // Change Acme Car Rental to your business name
+                  from: "ECA Car Rental <onboarding@resend.dev>", // MUST match your Resend verified domain
                   to: ADMIN_EMAIL,
                   subject: `🚨 New Booking Approval Needed: ${args.car_model}`,
                   html: `
@@ -1127,21 +1151,30 @@ Reply to the customer message exactly as ${agentName} would.`;
                       <h2>New Booking Requires Approval</h2>
                       <p><strong>Customer Phone:</strong> ${customerPhone}</p>
                       <p><strong>Car:</strong> ${args.car_model}</p>
-                      <p><strong>Dates:</strong> ${args.rental_dates}</p>
+                      <p><strong>Dates:</strong> ${args.rental_dates} (${args.duration_days} Days)</p>
+                      <p><strong>Pickup Time:</strong> ${args.pickup_time}</p>
                       <p><strong>Area:</strong> ${args.area}</p>
                       <br/>
-                      <p><a href="${args.receipt_url}" style="padding: 12px 24px; background: #000; color: #fff; text-decoration: none; border-radius: 6px; font-weight: bold;">View Payment Receipt</a></p>
+                      <h3>Documents Submitted:</h3>
+                      <ul>
+                        <li><a href="${args.receipt_url}">View Payment Receipt</a></li>
+                        <li><a href="${args.ic_url}">View IC</a></li>
+                        <li><a href="${args.license_url}">View Driving License</a></li>
+                        <li><a href="${args.utility_bill_url}">View Utility Bill</a></li>
+                      </ul>
                       <br/>
                       <p style="color: #666; font-size: 14px;">Please log in to your Helpdesk Dashboard to approve (✅) or reject (❌) this booking.</p>
                     </div>
                   `
                 })
               });
-            } else {
-              console.warn("RESEND_API_KEY not found. Email notification skipped.");
+
+              if (!emailResponse.ok) {
+                console.error("❌ Resend API Error:", await emailResponse.text());
+              }
             }
 
-            toolResult = { success: true, message: "Booking submitted successfully. Tell the customer that an admin is verifying their payment and will confirm shortly." };
+            toolResult = { success: true, message: "Booking submitted. Tell the customer we are verifying their documents." };
           } catch (e: any) {
             console.error("Submit Booking Error:", e);
             toolResult = { error: "Failed to submit booking." };

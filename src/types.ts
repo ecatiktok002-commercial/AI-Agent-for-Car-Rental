@@ -77,3 +77,26 @@ export interface KnowledgeFact {
   is_active: boolean;
   created_at: string;
 }
+
+export interface BookingLead {
+  id: string;
+  ticket_id: string;
+  customer_phone: string;
+  car_model: string;
+  area: string;
+  rental_dates: string;
+  pickup_time?: string;
+  duration_days?: number;
+  receipt_url?: string;
+  ic_url?: string;
+  license_url?: string;
+  utility_bill_url?: string;
+  status: 'pending_verification' | 'confirmed' | 'rejected';
+  created_at: string;
+  tickets?: {
+    customer?: {
+      name: string;
+      phone_number: string;
+    }
+  }
+}
