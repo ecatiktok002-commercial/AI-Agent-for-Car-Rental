@@ -8,6 +8,7 @@ const META_ACCESS_TOKEN = Deno.env.get("META_ACCESS_TOKEN");
 const META_PHONE_ID = Deno.env.get("META_PHONE_ID");
 const META_VERIFY_TOKEN = Deno.env.get("META_VERIFY_TOKEN") || "ECA_SECURE_Tiktok003_2026";
 const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
+const GEMINI_BACKUP_KEY = Deno.env.get("GEMINI_BACKUP_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
@@ -827,32 +828,39 @@ async function sendWhatsAppMessage(to: string, text: string) {
 
 // Helper: Generate AI Response using Gemini
 async function generateAIResponse(userInput: string, customerName: string, customerPhone: string, ticketId: string, customPersona?: string, agentName?: string, history: any[] = [], referenceSnippets?: string) {
-  // Initialize GoogleGenAI
-  const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY || '' });
-  
-  // 1. Fetch Company Knowledge Base Facts (RAG)
-  const { data: facts } = await supabase
-    .from('company_knowledge')
-    .select('category, topic, fact')
-    .eq('is_active', true);
+  let currentKey = GEMINI_API_KEY || '';
+  let attempts = 0;
+  const maxAttempts = GEMINI_BACKUP_KEY ? 2 : 1;
+  let lastError = null;
 
-  const formattedFacts = facts && facts.length > 0 
-    ? facts.map(f => `[${f.category} - ${f.topic}]: ${f.fact}`).join('\n')
-    : "No specific company facts available.";
+  while (attempts < maxAttempts) {
+    try {
+      attempts++;
+      const ai = new GoogleGenAI({ apiKey: currentKey });
+      
+      // 1. Fetch Company Knowledge Base Facts (RAG)
+      const { data: facts } = await supabase
+        .from('company_knowledge')
+        .select('category, topic, fact')
+        .eq('is_active', true);
 
-  const knowledgeBaseBlock = `COMPANY KNOWLEDGE BASE: You must strictly adhere to the following company facts. 
+      const formattedFacts = facts && facts.length > 0 
+        ? facts.map(f => `[${f.category} - ${f.topic}]: ${f.fact}`).join('\n')
+        : "No specific company facts available.";
+
+      const knowledgeBaseBlock = `COMPANY KNOWLEDGE BASE: You must strictly adhere to the following company facts. 
 * If a customer asks a question related to these topics, use this information as your ONLY source of truth.
 * Do not invent policies, prices, or services not listed here.
 * If the information is not in the knowledge base, politely inform the customer that you need a moment to check or double-check with the team.
 * CRITICAL: NEVER mention that you are an AI, a bot, or that you are passing them to a "human agent". You MUST act as a real human staff member at all times.
 ${formattedFacts}`;
 
-  const isFirstMessage = !history || history.length === 0;
-  const greetingRule = isFirstMessage 
-    ? "* This is the FIRST message. Start with a warm greeting (e.g., 'Hii!', 'Salam', 'hi awak!')."
-    : "* This is an ONGOING conversation. DO NOT greet the customer again. Jump straight to the answer.";
+      const isFirstMessage = !history || history.length === 0;
+      const greetingRule = isFirstMessage 
+        ? "* This is the FIRST message. Start with a warm greeting (e.g., 'Hii!', 'Salam', 'hi awak!')."
+        : "* This is an ONGOING conversation. DO NOT greet the customer again. Jump straight to the answer.";
 
-  const conversationFlowRule = `
+      const conversationFlowRule = `
 CONVERSATION RULES (STRICT):
 ${greetingRule}
 * BE CONCISE. WhatsApp users prefer short, direct messages.
@@ -861,14 +869,14 @@ ${greetingRule}
 * Never repeat greetings in the middle of a chat.
 `;
 
-  // 2. Fetch Global System Prompt from Database
-  const { data: settings } = await supabase
-    .from('system_settings')
-    .select('value')
-    .eq('key', 'ai_system_prompt')
-    .single();
+      // 2. Fetch Global System Prompt from Database
+      const { data: settings } = await supabase
+        .from('system_settings')
+        .select('value')
+        .eq('key', 'ai_system_prompt')
+        .single();
 
-  const globalPrompt = settings?.value || `You are the official Assistant for ECA Group. 
+      const globalPrompt = settings?.value || `You are the official Assistant for ECA Group. 
   Your goal is to provide fast, accurate, and concise support.
   
   Guidelines:
@@ -887,14 +895,14 @@ ${greetingRule}
   If get_all_cars returns a list of cars, list them nicely to the customer.
   If the tool fails, say: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya."`;
 
-  let basePrompt = `${knowledgeBaseBlock}
+      let basePrompt = `${knowledgeBaseBlock}
 ${conversationFlowRule}
 
 ${globalPrompt}`;
 
-  if (customPersona) {
-    basePrompt += `\n\n--- AGENT PERSONA OVERRIDE ---\n`;
-    basePrompt += `CRITICAL INSTRUCTION: You are NO LONGER a generic assistant. You are now acting as the AI First-Responder for ${agentName}. 
+      if (customPersona) {
+        basePrompt += `\n\n--- AGENT PERSONA OVERRIDE ---\n`;
+        basePrompt += `CRITICAL INSTRUCTION: You are NO LONGER a generic assistant. You are now acting as the AI First-Responder for ${agentName}. 
 * You MUST completely adopt their exact tone, vocabulary, slang, and style.
 * IGNORE any previous instructions to be "professional" if it conflicts with this persona.
 * Do NOT prefix your response with your name (e.g., do not start with "${agentName}:"). 
@@ -905,52 +913,52 @@ ${customPersona}
 
 ${referenceSnippets ? `STYLE REFERENCE (Mimic this tone/vocabulary):\n${referenceSnippets}\n` : ''}
 Reply to the customer message exactly as ${agentName} would.`;
-  }
-
-  // Format history for Gemini contents array
-  const rawContents: { role: string, text: string }[] = [];
-  
-  // Add history messages
-  if (history && history.length > 0) {
-    for (const msg of history) {
-      if (msg.sender_type === 'system') continue;
-      const text = msg.message_text || "";
-      if (!text.trim()) continue;
-      const role = msg.sender_type === 'customer' ? 'user' : 'model';
-      rawContents.push({ role, text: text.trim() });
-    }
-  }
-
-  // Add the current user input
-  if (userInput && userInput.trim()) {
-    rawContents.push({ role: 'user', text: userInput.trim() });
-  }
-
-  // Merge consecutive roles and ensure first role is 'user'
-  const contents: any[] = [];
-  for (const msg of rawContents) {
-    if (contents.length === 0) {
-      if (msg.role === 'user') {
-        contents.push({ role: msg.role, parts: [{ text: msg.text }] });
       }
-      // Skip leading 'model' messages to satisfy Gemini API requirements
-    } else {
-      if (contents[contents.length - 1].role === msg.role) {
-        contents[contents.length - 1].parts[0].text += `\n\n${msg.text}`;
-      } else {
-        contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+
+      // Format history for Gemini contents array
+      const rawContents: { role: string, text: string }[] = [];
+      
+      // Add history messages
+      if (history && history.length > 0) {
+        for (const msg of history) {
+          if (msg.sender_type === 'system') continue;
+          const text = msg.message_text || "";
+          if (!text.trim()) continue;
+          const role = msg.sender_type === 'customer' ? 'user' : 'model';
+          rawContents.push({ role, text: text.trim() });
+        }
       }
-    }
-  }
 
-  if (contents.length === 0) {
-    // Fallback if somehow contents is empty
-    contents.push({ role: 'user', parts: [{ text: "Hello" }] });
-  }
+      // Add the current user input
+      if (userInput && userInput.trim()) {
+        rawContents.push({ role: 'user', text: userInput.trim() });
+      }
 
-  // Add a final instruction to the basePrompt to ensure completion
-  const todayDate = new Date().toISOString().split('T')[0];
-  const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.
+      // Merge consecutive roles and ensure first role is 'user'
+      const contents: any[] = [];
+      for (const msg of rawContents) {
+        if (contents.length === 0) {
+          if (msg.role === 'user') {
+            contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+          }
+          // Skip leading 'model' messages to satisfy Gemini API requirements
+        } else {
+          if (contents[contents.length - 1].role === msg.role) {
+            contents[contents.length - 1].parts[0].text += `\n\n${msg.text}`;
+          } else {
+            contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+          }
+        }
+      }
+
+      if (contents.length === 0) {
+        // Fallback if somehow contents is empty
+        contents.push({ role: 'user', parts: [{ text: "Hello" }] });
+      }
+
+      // Add a final instruction to the basePrompt to ensure completion
+      const todayDate = new Date().toISOString().split('T')[0];
+      const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.
 
 BOOKING WORKFLOW RULE:
 1. AVAILABILITY CHECK: If a customer asks if a car is available ("Ada kosong tak?", "Available?", etc.) or asks for a list of cars, you MUST use the 'get_car_availability' or 'get_all_cars' tools.
@@ -964,364 +972,353 @@ BOOKING WORKFLOW RULE:
    b. In the SAME message, instruct the customer to make the payment and upload 3 items: IC, Driving License, and Payment Receipt. You MUST include the exact text "[SEND_QR]" so the system attaches the QR code.
 3. Wait for the customer to upload the documents. (Documents will appear in your prompt as [IMAGE_RECEIPT: url] or [DOCUMENT_RECEIPT: url]).
 4. Once you see the documents AND the customer confirms (e.g., "done", "dah", "confirm", "jadi"), you MUST call the 'save_booking_lead' tool with the details from the summary.
-5. After the tool succeeds, reply to the customer confirming the booking is secured and that a human agent will verify the documents shortly. Reply in your assigned persona.`;
+5. After the tool succeeds, reply to the customer confirming the booking is secured and that a human agent will verify the documents shortly. Reply in your assigned persona.
 
-  const getCarAvailabilityDeclaration: FunctionDeclaration = {
-    name: "get_car_availability",
-    description: "Check if a specific car model is available for a given date.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        car_model: {
-          type: Type.STRING,
-          description: "The model of the car (e.g., Axia, Bezza, Saga).",
+TOOL USAGE RULES:
+* If get_car_availability returns available: true, you say: "Ada boss! [Model] masih available untuk tarikh tu. Nak I proceed booking ke? 😊"
+* If get_car_availability returns available: false, you say: "Alamak boss, [Model] dah kena tapau (booked) la untuk tarikh tu. Tapi jap, I check Bezza atau Saga untuk boss nak?" (Then check the tool again for alternatives).
+* Use the stalling tactic ("Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya.") ONLY if the tool fails or a network error occurs.`;
+
+      const getCarAvailabilityDeclaration: FunctionDeclaration = {
+        name: "get_car_availability",
+        description: "Check if a specific car model is available for a given date.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            car_model: {
+              type: Type.STRING,
+              description: "The model of the car (e.g., Axia, Bezza, Saga).",
+            },
+            date: {
+              type: Type.STRING,
+              description: "The date to check availability for. MUST be strictly in YYYY-MM-DD format. If the user says 'tomorrow', 'esok', or '4/4', you must convert it to the correct YYYY-MM-DD date based on today's date.",
+            },
+          },
+          required: ["car_model", "date"],
         },
-        date: {
-          type: Type.STRING,
-          description: "The date to check availability for. MUST be strictly in YYYY-MM-DD format. If the user says 'tomorrow', 'esok', or '4/4', you must convert it to the correct YYYY-MM-DD date based on today's date.",
-        },
-      },
-      required: ["car_model", "date"],
-    },
-  };
+      };
 
-  const getAllCarsDeclaration: FunctionDeclaration = {
-    name: "get_all_cars",
-    description: "Get a list of all car models available for rent in the company fleet.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {},
-    }
-  };
-
-  const saveBookingLeadDeclaration: FunctionDeclaration = {
-    name: "save_booking_lead",
-    description: "Save the complete booking details after documents are received.",
-    parameters: {
-      type: Type.OBJECT,
-      properties: {
-        vehicle_model: { type: Type.STRING, description: "The vehicle model they are booking." },
-        pickup_date: { type: Type.STRING, description: "The date of pickup." },
-        pickup_time: { type: Type.STRING, description: "The time of pickup." },
-        price: { type: Type.STRING, description: "The price of the rental." },
-        duration: { type: Type.STRING, description: "The duration of the rental." },
-        ic_url: { type: Type.STRING, description: "The URL of the IC image." },
-        license_url: { type: Type.STRING, description: "The URL of the License image." },
-        receipt_url: { type: Type.STRING, description: "The URL of the Payment Receipt image." }
-      },
-      required: ["vehicle_model", "pickup_date", "pickup_time", "price", "duration"],
-    },
-  };
-
-  try {
-    if (!GEMINI_API_KEY) {
-      console.error("GEMINI_API_KEY is missing!");
-      throw new Error("GEMINI_API_KEY is missing");
-    }
-
-    // NEW: Helper function to automatically switch models on failure
-    const callGeminiWithFallback = async (requestParams: any) => {
-      const primaryModel = "gemini-3.1-flash-lite-preview";
-      const fallbackModel = "gemini-3-flash-preview";
-      
-      try {
-        return await ai.models.generateContent({
-          ...requestParams,
-          model: primaryModel
-        });
-      } catch (error: any) {
-        console.warn(`⚠️ Primary model (${primaryModel}) failed: ${error.message}. Rerouting to fallback (${fallbackModel})...`);
-        return await ai.models.generateContent({
-          ...requestParams,
-          model: fallbackModel
-        });
-      }
-    };
-
-    // 1. First AI Call using the fallback helper
-    let response = await callGeminiWithFallback({
-      contents: contents,
-      config: {
-        systemInstruction: finalBasePrompt,
-        temperature: 0.7,
-        topK: 40,
-        topP: 0.95,
-        tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
-      }
-    });
-
-    let loopCount = 0;
-    while (response.functionCalls && response.functionCalls.length > 0 && loopCount < 3) {
-      loopCount++;
-      
-      // Append the model's response (which contains the function calls) to contents
-      if (response.candidates && response.candidates[0].content) {
-        contents.push(response.candidates[0].content);
-      }
-
-      const functionResponseParts = [];
-      let anyToolCalled = false;
-
-      for (const call of response.functionCalls) {
-        let toolResult: any = {};
-        let toolCalled = false;
-
-        if (call.name === "get_car_availability") {
-          toolCalled = true;
-          try {
-            const args = call.args as any;
-            const carModel = args.car_model || '';
-            const checkDate = args.date || new Date().toISOString().split('T')[0];
-
-            if (extSupabase) {
-              // Call the database function via safe HTTPS API
-              const { data, error } = await extSupabase.rpc('check_car_availability', {
-                p_model: carModel,
-                p_date: checkDate,
-                p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
-              });
-
-              if (error) {
-                console.error("RPC Error (Availability):", error.message);
-                toolResult = { error: error.message };
-              } else {
-                toolResult = { available: data === true };
-              }
-            } else {
-              toolResult = { error: "External Supabase keys not configured." };
-            }
-          } catch (e: any) {
-            console.error("Tool Execution Error (Availability):", e.message);
-            toolResult = { error: e.message };
-          }
-
-        } else if (call.name === "get_all_cars") {
-          toolCalled = true;
-          
-          try {
-            if (extSupabase) {
-              // Call the database function via safe HTTPS API
-              const { data, error } = await extSupabase.rpc('get_all_car_models', {
-                p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
-              });
-
-              if (error) {
-                console.error("RPC Error (All Cars):", error.message);
-                toolResult = { error: error.message };
-              } else {
-                toolResult = { cars: data || [] };
-              }
-            } else {
-              toolResult = { error: "External Supabase keys not configured." };
-            }
-          } catch (e: any) {
-            console.error("Tool Execution Error (All Cars):", e.message);
-            toolResult = { error: e.message };
-          }
-        } else if (call.name === "save_booking_lead") {
-          toolCalled = true;
-          const args = call.args as any;
-          
-          try {
-            console.log("🚀 Saving booking lead:", JSON.stringify(args));
-            
-            // 1. Save to the Bookings database
-            const bookingData = {
-              ticket_id: ticketId,
-              customer_phone: customerPhone,
-              vehicle_model: args.vehicle_model,
-              pickup_date: args.pickup_date,
-              pickup_time: args.pickup_time,
-              price: args.price,
-              duration: args.duration,
-              ic_url: args.ic_url,
-              license_url: args.license_url,
-              receipt_url: args.receipt_url,
-              status: 'Pending'
-            };
-
-            const { error } = await supabase.from('booking_leads').insert([bookingData]);
-
-            if (error) {
-              console.error("❌ Insert Failed:", error.message);
-              throw error;
-            }
-            
-            // Update the ticket tag
-            await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticketId);
-
-            // 2. Send Email Notification to Admin
-            const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-            const ADMIN_EMAIL = Deno.env.get("ADMIN_EMAIL") || "your-email@example.com";
-
-            if (RESEND_API_KEY) {
-              const emailResponse = await fetch("https://api.resend.com/emails", {
-                method: "POST",
-                headers: {
-                  "Authorization": `Bearer ${RESEND_API_KEY}`,
-                  "Content-Type": "application/json"
-                },
-                body: JSON.stringify({
-                  from: "ECA Car Rental <onboarding@resend.dev>",
-                  to: ADMIN_EMAIL,
-                  subject: `🚨 New Booking: ${args.vehicle_model}`,
-                  html: `
-                    <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-                      <h2>New Booking Received</h2>
-                      <p><strong>Customer Phone:</strong> ${customerPhone}</p>
-                      <p><strong>Vehicle:</strong> ${args.vehicle_model}</p>
-                      <p><strong>Pickup:</strong> ${args.pickup_date} @ ${args.pickup_time}</p>
-                      <p><strong>Price:</strong> ${args.price}</p>
-                      <p><strong>Duration:</strong> ${args.duration}</p>
-                    </div>
-                  `
-                })
-              });
-              console.log("📧 Email Status:", emailResponse.status);
-            }
-
-            toolResult = { success: true, message: "Booking saved successfully. Admin will verify documents." };
-          } catch (err: any) {
-            console.error("❌ Booking Save Error:", err.message);
-            toolResult = { error: err.message };
-          }
+      const getAllCarsDeclaration: FunctionDeclaration = {
+        name: "get_all_cars",
+        description: "Get a list of all car models available for rent in the company fleet.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {},
         }
+      };
 
-        if (toolCalled) {
-          anyToolCalled = true;
-          functionResponseParts.push({
-            functionResponse: {
-              name: call.name,
-              response: toolResult,
-              id: call.id
-            }
+      const saveBookingLeadDeclaration: FunctionDeclaration = {
+        name: "save_booking_lead",
+        description: "Save the complete booking details after documents are received.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            vehicle_model: { type: Type.STRING, description: "The vehicle model they are booking." },
+            pickup_date: { type: Type.STRING, description: "The date of pickup." },
+            pickup_time: { type: Type.STRING, description: "The time of pickup." },
+            price: { type: Type.STRING, description: "The price of the rental." },
+            duration: { type: Type.STRING, description: "The duration of the rental." },
+            ic_url: { type: Type.STRING, description: "The URL of the IC image." },
+            license_url: { type: Type.STRING, description: "The URL of the License image." },
+            receipt_url: { type: Type.STRING, description: "The URL of the Payment Receipt image." }
+          },
+          required: ["vehicle_model", "pickup_date", "pickup_time", "price", "duration"],
+        },
+      };
+
+      // Helper function to automatically switch models on failure
+      const callGeminiWithFallback = async (requestParams: any) => {
+        const primaryModel = "gemini-3.1-flash-lite-preview";
+        const fallbackModel = "gemini-3-flash-preview";
+        
+        try {
+          return await ai.models.generateContent({
+            ...requestParams,
+            model: primaryModel
+          });
+        } catch (error: any) {
+          console.warn(`⚠️ Primary model (${primaryModel}) failed: ${error.message}. Rerouting to fallback (${fallbackModel})...`);
+          return await ai.models.generateContent({
+            ...requestParams,
+            model: fallbackModel
           });
         }
-      }
+      };
 
-      if (anyToolCalled) {
-        contents.push({
-          role: "user",
-          parts: functionResponseParts
-        });
+      // 1. First AI Call using the fallback helper
+      let response = await callGeminiWithFallback({
+        contents: contents,
+        config: {
+          systemInstruction: finalBasePrompt,
+          temperature: 0.7,
+          topK: 40,
+          topP: 0.95,
+          tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
+        }
+      });
 
-        // Call Gemini again with the tool responses using fallback
-        response = await callGeminiWithFallback({
-          contents: contents,
-          config: {
-            systemInstruction: finalBasePrompt,
-            temperature: 0.7,
-            topK: 40,
-            topP: 0.95,
-            tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
+      let loopCount = 0;
+      while (response.candidates?.[0]?.content?.parts?.some(p => p.functionCall) && loopCount < 5) {
+        loopCount++;
+        const functionResponseParts = [];
+        let anyToolCalled = false;
+
+        for (const part of response.candidates[0].content.parts) {
+          if (!part.functionCall) continue;
+          const call = part.functionCall;
+          let toolResult = {};
+          let toolCalled = false;
+
+          if (call.name === "get_car_availability") {
+            toolCalled = true;
+            const args = call.args as any;
+            try {
+              if (extSupabase) {
+                const { data, error } = await extSupabase.rpc('check_car_availability', {
+                  p_car_model: args.car_model,
+                  p_date: args.date,
+                  p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
+                });
+
+                if (error) {
+                  console.error("RPC Error (Availability):", error.message);
+                  toolResult = { error: error.message };
+                } else {
+                  toolResult = data || { available: false, message: "No data returned from system." };
+                }
+              } else {
+                toolResult = { error: "External Supabase keys not configured." };
+              }
+            } catch (e: any) {
+              console.error("Tool Execution Error (Availability):", e.message);
+              toolResult = { error: e.message };
+            }
+          } else if (call.name === "get_all_cars") {
+            toolCalled = true;
+            try {
+              if (extSupabase) {
+                const { data, error } = await extSupabase.rpc('get_all_car_models', {
+                  p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
+                });
+
+                if (error) {
+                  console.error("RPC Error (All Cars):", error.message);
+                  toolResult = { error: error.message };
+                } else {
+                  toolResult = { cars: data || [] };
+                }
+              } else {
+                toolResult = { error: "External Supabase keys not configured." };
+              }
+            } catch (e: any) {
+              console.error("Tool Execution Error (All Cars):", e.message);
+              toolResult = { error: e.message };
+            }
+          } else if (call.name === "save_booking_lead") {
+            toolCalled = true;
+            const args = call.args as any;
+            
+            try {
+              console.log("🚀 Saving booking lead:", JSON.stringify(args));
+              
+              const bookingData = {
+                ticket_id: ticketId,
+                customer_phone: customerPhone,
+                vehicle_model: args.vehicle_model,
+                pickup_date: args.pickup_date,
+                pickup_time: args.pickup_time,
+                price: args.price,
+                duration: args.duration,
+                ic_url: args.ic_url,
+                license_url: args.license_url,
+                receipt_url: args.receipt_url,
+                status: 'Pending'
+              };
+
+              const { error } = await supabase.from('booking_leads').insert([bookingData]);
+
+              if (error) {
+                console.error("❌ Insert Failed:", error.message);
+                throw error;
+              }
+              
+              await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticketId);
+
+              const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
+              const ADMIN_EMAIL = Deno.env.get("ADMIN_EMAIL") || "your-email@example.com";
+
+              if (RESEND_API_KEY) {
+                const emailResponse = await fetch("https://api.resend.com/emails", {
+                  method: "POST",
+                  headers: {
+                    "Authorization": `Bearer ${RESEND_API_KEY}`,
+                    "Content-Type": "application/json"
+                  },
+                  body: JSON.stringify({
+                    from: "ECA Car Rental <onboarding@resend.dev>",
+                    to: ADMIN_EMAIL,
+                    subject: `🚨 New Booking: ${args.vehicle_model}`,
+                    html: `
+                      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                        <h2>New Booking Received</h2>
+                        <p><strong>Customer Phone:</strong> ${customerPhone}</p>
+                        <p><strong>Vehicle:</strong> ${args.vehicle_model}</p>
+                        <p><strong>Pickup:</strong> ${args.pickup_date} @ ${args.pickup_time}</p>
+                        <p><strong>Price:</strong> ${args.price}</p>
+                        <p><strong>Duration:</strong> ${args.duration}</p>
+                      </div>
+                    `
+                  })
+                });
+                console.log("📧 Email Status:", emailResponse.status);
+              }
+
+              toolResult = { success: true, message: "Booking saved successfully. Admin will verify documents." };
+            } catch (err: any) {
+              console.error("❌ Booking Save Error:", err.message);
+              toolResult = { error: err.message };
+            }
           }
-        });
-      } else {
-        break;
+
+          if (toolCalled) {
+            anyToolCalled = true;
+            functionResponseParts.push({
+              functionResponse: {
+                name: call.name,
+                response: toolResult,
+                id: call.id
+              }
+            });
+          }
+        }
+
+        if (anyToolCalled) {
+          contents.push({
+            role: "user",
+            parts: functionResponseParts
+          });
+
+          response = await callGeminiWithFallback({
+            contents: contents,
+            config: {
+              systemInstruction: finalBasePrompt,
+              temperature: 0.7,
+              topK: 40,
+              topP: 0.95,
+              tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
+            }
+          });
+        } else {
+          break;
+        }
       }
-    }
 
-    let aiResponseText = '';
-    try {
-      aiResponseText = response.text || '';
-    } catch (e: any) {
-      console.error("Error getting response.text:", e);
-      return "Kejap ya, I check dulu... [NEEDS_AGENT]";
-    }
-    
-    if (!aiResponseText) {
-       console.error("Gemini API returned no text. Full response:", JSON.stringify(response));
-       return "Kejap ya, I check dulu... [NEEDS_AGENT]";
-    }
-    
-    // Post-processing: Remove name prefix if present (e.g., "Biha: Hello", "**Biha:** Hello" -> "Hello")
-    if (agentName) {
-      const prefixRegex = new RegExp(`^\\*?\\*?${agentName}\\*?\\*?\\s*:\\s*`, 'i');
-      aiResponseText = aiResponseText.replace(prefixRegex, '').trim();
-    }
-    aiResponseText = aiResponseText.replace(/^\*?\*?Assistant\*?\*?\s*:\s*/i, '').trim();
-
-    // --- NEW: AUTO-CAPTURE FALLBACK ---
-    // If the AI says it's confirmed or processing but the tool wasn't called successfully
-    const lowerResponse = aiResponseText.toLowerCase();
-    const impliesConfirmed = lowerResponse.includes("confirm") || 
-                             lowerResponse.includes("selesai") || 
-                             lowerResponse.includes("berjaya") || 
-                             lowerResponse.includes("cunnn") ||
-                             lowerResponse.includes("settle") ||
-                             lowerResponse.includes("siap") ||
-                             lowerResponse.includes("done") ||
-                             (lowerResponse.includes("admin") && lowerResponse.includes("check") && lowerResponse.includes("dokumen"));
-    
-    if (impliesConfirmed) {
+      let aiResponseText = '';
       try {
-        // Check if a lead already exists for this ticket to avoid duplicates
-        const { data: existingLead } = await supabase
-          .from('booking_leads')
-          .select('id')
-          .eq('ticket_id', ticketId)
-          .maybeSingle();
+        aiResponseText = response.text || '';
+      } catch (e: any) {
+        console.error("Error getting response.text:", e);
+        return "Kejap ya, I check dulu... [NEEDS_AGENT]";
+      }
+      
+      if (!aiResponseText) {
+         console.error("Gemini API returned no text. Full response:", JSON.stringify(response));
+         return "Kejap ya, I check dulu... [NEEDS_AGENT]";
+      }
+      
+      if (agentName) {
+        const prefixRegex = new RegExp(`^\\*?\\*?${agentName}\\*?\\*?\\s*:\\s*`, 'i');
+        aiResponseText = aiResponseText.replace(prefixRegex, '').trim();
+      }
+      aiResponseText = aiResponseText.replace(/^\*?\*?Assistant\*?\*?\s*:\s*/i, '').trim();
 
-        if (!existingLead) {
-          console.log("Auto-capturing booking details from conversation...");
-          // Extract details using a quick Gemini call
-          const extractionPrompt = `Extract the vehicle model, pickup date, pickup time, price, duration, IC image URL, License image URL, and Payment Receipt image URL from this conversation history. 
+      const lowerResponse = aiResponseText.toLowerCase();
+      const impliesConfirmed = lowerResponse.includes("confirm") || 
+                               lowerResponse.includes("selesai") || 
+                               lowerResponse.includes("berjaya") || 
+                               lowerResponse.includes("cunnn") ||
+                               lowerResponse.includes("settle") ||
+                               lowerResponse.includes("siap") ||
+                               lowerResponse.includes("done") ||
+                               (lowerResponse.includes("admin") && lowerResponse.includes("check") && lowerResponse.includes("dokumen"));
+      
+      if (impliesConfirmed) {
+        try {
+          const { data: existingLead } = await supabase
+            .from('booking_leads')
+            .select('id')
+            .eq('ticket_id', ticketId)
+            .maybeSingle();
+
+          if (!existingLead) {
+            console.log("Auto-capturing booking details from conversation...");
+            const extractionPrompt = `Extract the vehicle model, pickup date, pickup time, price, duration, IC image URL, License image URL, and Payment Receipt image URL from this conversation history. 
 Look for patterns like [IMAGE_RECEIPT: url] or [DOCUMENT_RECEIPT: url].
 Return ONLY a valid JSON object with keys: "vehicle_model", "pickup_date", "pickup_time", "price", "duration", "ic_url", "license_url", "receipt_url". 
 If you cannot find a value, use null. Do not include markdown formatting. 
 Conversation: ${JSON.stringify(contents)}`;
-          
-          const extraction = await ai.models.generateContent({
-            model: "gemini-1.5-flash",
-            contents: extractionPrompt
-          });
-          
-          let details = { 
-            vehicle_model: "Unknown", 
-            pickup_date: "Unknown", 
-            pickup_time: "Unknown", 
-            price: "Unknown", 
-            duration: "Unknown",
-            ic_url: null,
-            license_url: null,
-            receipt_url: null
-          };
-          try {
-            const jsonStr = extraction.text?.replace(/```json/g, '').replace(/```/g, '').trim() || "{}";
-            details = JSON.parse(jsonStr);
-          } catch (parseErr) {
-            console.error("Failed to parse extraction JSON:", parseErr);
+            
+            const extraction = await ai.models.generateContent({
+              model: "gemini-1.5-flash",
+              contents: extractionPrompt
+            });
+            
+            let details = { 
+              vehicle_model: "Unknown", 
+              pickup_date: "Unknown", 
+              pickup_time: "Unknown", 
+              price: "Unknown", 
+              duration: "Unknown",
+              ic_url: null,
+              license_url: null,
+              receipt_url: null
+            };
+            try {
+              const jsonStr = extraction.text?.replace(/```json/g, '').replace(/```/g, '').trim() || "{}";
+              details = JSON.parse(jsonStr);
+            } catch (parseErr) {
+              console.error("Failed to parse extraction JSON:", parseErr);
+            }
+
+            await supabase.from('booking_leads').insert([{
+              ticket_id: ticketId,
+              customer_phone: customerPhone,
+              vehicle_model: details.vehicle_model || "Auto-captured",
+              pickup_date: details.pickup_date || "Auto-captured",
+              pickup_time: details.pickup_time || "Auto-captured",
+              price: details.price || "Auto-captured",
+              duration: details.duration || "Auto-captured",
+              ic_url: details.ic_url,
+              license_url: details.license_url,
+              receipt_url: details.receipt_url,
+              status: 'Pending'
+            }]);
+            
+            await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticketId);
           }
-
-          // Insert into booking_leads with all available info
-          await supabase.from('booking_leads').insert([{
-            ticket_id: ticketId,
-            customer_phone: customerPhone,
-            vehicle_model: details.vehicle_model || "Auto-captured",
-            pickup_date: details.pickup_date || "Auto-captured",
-            pickup_time: details.pickup_time || "Auto-captured",
-            price: details.price || "Auto-captured",
-            duration: details.duration || "Auto-captured",
-            ic_url: details.ic_url,
-            license_url: details.license_url,
-            receipt_url: details.receipt_url,
-            status: 'Pending'
-          }]);
-          
-          // Update ticket tag
-          await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticketId);
+        } catch (fallbackErr) {
+          console.error("Auto-capture fallback failed:", fallbackErr);
         }
-      } catch (fallbackErr) {
-        console.error("Auto-capture fallback failed:", fallbackErr);
       }
-    }
-    // --- END AUTO-CAPTURE FALLBACK ---
 
-    return aiResponseText;
-  } catch (error: any) {
-    console.error("Gemini Fetch Error:", error);
-    return "Kejap ya, I check dulu... [NEEDS_AGENT]";
+      return aiResponseText;
+
+    } catch (error: any) {
+      lastError = error;
+      const isQuotaError = error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED") || (error.status === 429);
+      
+      if (isQuotaError && attempts < maxAttempts && GEMINI_BACKUP_KEY) {
+        console.log("⚠️ Free Tier Exhausted. Retrying with Paid Backup Key...");
+        currentKey = GEMINI_BACKUP_KEY;
+        continue;
+      }
+      
+      console.error("Gemini Fetch Error:", error);
+      return "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]";
+    }
   }
+  
+  return "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]";
 }
 
 async function sendWhatsAppImage(to: string, imageUrl: string) {
