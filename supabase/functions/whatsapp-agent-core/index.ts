@@ -1058,27 +1058,9 @@ TOOL USAGE RULES:
         },
       };
 
-      // Helper function to automatically switch models on failure
-      const callGeminiWithFallback = async (requestParams: any) => {
-        const primaryModel = "gemini-3.1-flash-lite-preview";
-        const fallbackModel = "gemini-3-flash-preview";
-        
-        try {
-          return await ai.models.generateContent({
-            ...requestParams,
-            model: primaryModel
-          });
-        } catch (error: any) {
-          console.warn(`⚠️ Primary model (${primaryModel}) failed: ${error.message}. Rerouting to fallback (${fallbackModel})...`);
-          return await ai.models.generateContent({
-            ...requestParams,
-            model: fallbackModel
-          });
-        }
-      };
-
-      // 1. First AI Call using the fallback helper
-      let response = await callGeminiWithFallback({
+      // 1. First AI Call
+      let response = await ai.models.generateContent({
+        model: "gemini-2.0-flash",
         contents: contents,
         config: {
           systemInstruction: finalBasePrompt,
@@ -1241,7 +1223,8 @@ TOOL USAGE RULES:
             parts: functionResponseParts
           });
 
-          response = await callGeminiWithFallback({
+          response = await ai.models.generateContent({
+            model: "gemini-2.0-flash",
             contents: contents,
             config: {
               systemInstruction: finalBasePrompt,
@@ -1302,7 +1285,7 @@ If you cannot find a value, use null. Do not include markdown formatting.
 Conversation: ${JSON.stringify(contents)}`;
             
             const extraction = await ai.models.generateContent({
-              model: "gemini-1.5-flash",
+              model: "gemini-2.0-flash",
               contents: extractionPrompt
             });
             

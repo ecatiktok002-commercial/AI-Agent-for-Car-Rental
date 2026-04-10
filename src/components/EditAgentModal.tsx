@@ -93,7 +93,7 @@ Reply to the customer message as if you are ${formData.name}.
 IMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.`;
 
       const response = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
+        model: "gemini-2.0-flash",
         config: {
           systemInstruction: basePrompt,
         },
