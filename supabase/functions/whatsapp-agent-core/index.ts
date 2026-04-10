@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { encode as base64Encode } from "https://deno.land/std@0.168.0/encoding/base64.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { GoogleGenAI, Type, FunctionDeclaration } from "npm:@google/genai";
 import postgres from "https://deno.land/x/postgresjs/mod.js";
@@ -613,10 +614,10 @@ serve(async (req) => {
               // Download media if the customer sent an image or document
               if (message.type === 'image' && message.image?.id) {
                 const mediaUrl = await processWhatsAppMedia(message.image.id, ticket.id, supabase, META_ACCESS_TOKEN);
-                text = mediaUrl ? `[IMAGE_RECEIPT: ${mediaUrl}]` : `[Customer sent an image, but it failed to download]`;
+                text = mediaUrl ? `[UPLOADED_IMAGE: ${mediaUrl}]` : `[Customer sent an image, but it failed to download]`;
               } else if (message.type === 'document' && message.document?.id) {
                 const mediaUrl = await processWhatsAppMedia(message.document.id, ticket.id, supabase, META_ACCESS_TOKEN);
-                text = mediaUrl ? `[DOCUMENT_RECEIPT: ${mediaUrl}]` : `[Customer sent a document, but it failed to download]`;
+                text = mediaUrl ? `[UPLOADED_DOCUMENT: ${mediaUrl}]` : `[Customer sent a document, but it failed to download]`;
               }
               
               if (!text) return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
@@ -882,6 +883,26 @@ ${formattedFacts}`;
         throw new Error("All models failed");
       };
 
+      // Helper function to fetch image and convert to inlineData for Gemini
+      const fetchImageForGemini = async (url: string) => {
+        try {
+          const response = await fetch(url);
+          if (!response.ok) return null;
+          const arrayBuffer = await response.arrayBuffer();
+          const base64 = base64Encode(new Uint8Array(arrayBuffer));
+          const mimeType = response.headers.get('content-type') || 'image/jpeg';
+          return {
+            inlineData: {
+              data: base64,
+              mimeType: mimeType
+            }
+          };
+        } catch (e) {
+          console.error("Failed to fetch image for Gemini:", e);
+          return null;
+        }
+      };
+
       const conversationFlowRule = `
 CONVERSATION RULES (STRICT):
 ${greetingRule}
@@ -959,16 +980,44 @@ Reply to the customer message exactly as ${agentName} would.`;
       // Merge consecutive roles and ensure first role is 'user'
       const contents: any[] = [];
       for (const msg of rawContents) {
+        let parts: any[] = [];
+        
+        // Check for images in the text
+        const imageRegex = /\[(?:IMAGE_RECEIPT|UPLOADED_IMAGE):\s*(https?:\/\/[^\]]+)\]/g;
+        let lastIndex = 0;
+        let match;
+        while ((match = imageRegex.exec(msg.text)) !== null) {
+          // Add text before the image
+          if (match.index > lastIndex) {
+            parts.push({ text: msg.text.substring(lastIndex, match.index) });
+          }
+          
+          // Add the image URL as text so the AI still has the reference
+          parts.push({ text: `[UPLOADED_IMAGE: ${match[1]}]` });
+          
+          // Fetch the image and add as inlineData
+          const imageData = await fetchImageForGemini(match[1]);
+          if (imageData) {
+            parts.push(imageData);
+          }
+          
+          lastIndex = imageRegex.lastIndex;
+        }
+        
+        // Add remaining text
+        if (lastIndex < msg.text.length) {
+          parts.push({ text: msg.text.substring(lastIndex) });
+        }
+
         if (contents.length === 0) {
           if (msg.role === 'user') {
-            contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+            contents.push({ role: msg.role, parts: parts });
           }
-          // Skip leading 'model' messages to satisfy Gemini API requirements
         } else {
           if (contents[contents.length - 1].role === msg.role) {
-            contents[contents.length - 1].parts[0].text += `\n\n${msg.text}`;
+            contents[contents.length - 1].parts.push(...parts);
           } else {
-            contents.push({ role: msg.role, parts: [{ text: msg.text }] });
+            contents.push({ role: msg.role, parts: parts });
           }
         }
       }
@@ -992,16 +1041,16 @@ BOOKING WORKFLOW RULE:
       Price: [Price/day]
       Duration: [Number] days
    b. In the SAME message, instruct the customer to make the payment and upload 3 items: IC, Driving License, and Payment Receipt. You MUST include the exact text "[SEND_QR]" so the system attaches the QR code.
-3. Wait for the customer to upload the documents. (Documents will appear in your prompt as [IMAGE_RECEIPT: url] or [DOCUMENT_RECEIPT: url]).
+3. Wait for the customer to upload the documents. (Documents will appear in your prompt as [UPLOADED_IMAGE: url] or [UPLOADED_DOCUMENT: url]).
 
 RECEIPT VALIDATION RULE (DATE CRITERIA):
-When the customer sends an image (which appears in text as [IMAGE_RECEIPT: url]), you must act as a strict validator. Look closely at the image for a PAYMENT DATE.
+When the customer sends an image (which appears in text as [UPLOADED_IMAGE: url] or [IMAGE_RECEIPT: url]), you must act as a strict validator. Look closely at the image for a PAYMENT DATE.
 1. If you can clearly see a payment date AND the image looks like a transaction receipt, you MUST immediately call the 'request_human_approval' tool.
 2. If there is NO date visible in the image, or it is clearly a random photo (e.g., a selfie, a car photo, or a blurry doc), DO NOT call the tool. Instead, reply politely in your persona: "Sorry boss, I tak nampak tarikh/masa bayaran dekat gambar ni. Boleh tolong hantar gambar resit penuh yang nampak tarikh hari ni tak? 🙏"
 
 IC VALIDATION RULE:
-When the customer sends an image for their IC, look closely for the keyword "MyKad".
-1. If "MyKad" is visible, accept it as a valid IC.
+When the customer sends an image for their IC, look closely for the keyword "MyKad" or a face photo with a blue background.
+1. If "MyKad" or a valid IC format is visible, accept it as a valid IC.
 2. If NOT visible, or it's a random photo, reply: "Sorry boss, gambar IC ni macam tak jelas la. Boleh tolong hantar gambar MyKad yang nampak jelas tak? 🙏"
 
 LICENSE VALIDATION RULE:
@@ -1010,7 +1059,7 @@ When the customer sends an image for their Driving License, look for "Lesen Mema
 2. If NOT visible, reply: "Boss, gambar lesen ni macam bukan lesen memandu la. Boleh tolong hantar gambar Lesen Memandu yang nampak jelas tak? Mekasih! 🚗"
 
 PDF DOCUMENT RULE:
-If the customer uploads a document/PDF instead of an image (which will appear in the chat as [DOCUMENT_RECEIPT: url] or contain a .pdf extension), DO NOT call the approval tool. The system cannot process PDFs for receipts. 
+If the customer uploads a document/PDF instead of an image (which will appear in the chat as [UPLOADED_DOCUMENT: url] or [DOCUMENT_RECEIPT: url] or contain a .pdf extension), DO NOT call the approval tool. The system cannot process PDFs for receipts. 
 Instead, reply politely: "Boss, sistem I tak boleh baca file PDF/Document la buat masa ni. Boleh tolong open PDF tu, buat screenshot, lepas tu hantar sebagai gambar (photo) biasa tak? Mekasih boss! 🚗"
 
 4. Once you see the documents AND the customer confirms (e.g., "done", "dah", "confirm", "jadi"), you MUST call the 'save_booking_lead' tool with the details from the summary.
@@ -1182,32 +1231,39 @@ TOOL USAGE RULES:
               await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticketId);
 
               const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-              const ADMIN_EMAIL = Deno.env.get("ADMIN_EMAIL") || "your-email@example.com";
+              const ADMIN_EMAIL = Deno.env.get("ADMIN_EMAIL") || "ecatiktok002@gmail.com";
 
               if (RESEND_API_KEY) {
-                const emailResponse = await fetch("https://api.resend.com/emails", {
-                  method: "POST",
-                  headers: {
-                    "Authorization": `Bearer ${RESEND_API_KEY}`,
-                    "Content-Type": "application/json"
-                  },
-                  body: JSON.stringify({
-                    from: "ECA Car Rental <onboarding@resend.dev>",
-                    to: ADMIN_EMAIL,
-                    subject: `🚨 New Booking: ${args.vehicle_model}`,
-                    html: `
-                      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-                        <h2>New Booking Received</h2>
-                        <p><strong>Customer Phone:</strong> ${customerPhone}</p>
-                        <p><strong>Vehicle:</strong> ${args.vehicle_model}</p>
-                        <p><strong>Pickup:</strong> ${args.pickup_date} @ ${args.pickup_time}</p>
-                        <p><strong>Price:</strong> ${args.price}</p>
-                        <p><strong>Duration:</strong> ${args.duration}</p>
-                      </div>
-                    `
-                  })
-                });
-                console.log("📧 Email Status:", emailResponse.status);
+                try {
+                  const emailResponse = await fetch("https://api.resend.com/emails", {
+                    method: "POST",
+                    headers: {
+                      "Authorization": `Bearer ${RESEND_API_KEY}`,
+                      "Content-Type": "application/json"
+                    },
+                    body: JSON.stringify({
+                      from: "ECA Car Rental <onboarding@resend.dev>",
+                      to: ADMIN_EMAIL,
+                      subject: `🚨 New Booking: ${args.vehicle_model}`,
+                      html: `
+                        <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+                          <h2>New Booking Received</h2>
+                          <p><strong>Customer Phone:</strong> ${customerPhone}</p>
+                          <p><strong>Vehicle:</strong> ${args.vehicle_model}</p>
+                          <p><strong>Pickup:</strong> ${args.pickup_date} @ ${args.pickup_time}</p>
+                          <p><strong>Price:</strong> ${args.price}</p>
+                          <p><strong>Duration:</strong> ${args.duration}</p>
+                        </div>
+                      `
+                    })
+                  });
+                  const emailData = await emailResponse.text();
+                  console.log("📧 Email Status:", emailResponse.status, emailData);
+                } catch (emailErr) {
+                  console.error("📧 Email Fetch Error:", emailErr);
+                }
+              } else {
+                console.log("⚠️ RESEND_API_KEY not set, skipping email notification.");
               }
 
               toolResult = { success: true, message: "Booking saved successfully. Admin will verify documents." };
@@ -1301,7 +1357,7 @@ TOOL USAGE RULES:
           if (!existingLead) {
             console.log("Auto-capturing booking details from conversation...");
             const extractionPrompt = `Extract the vehicle model, pickup date, pickup time, price, duration, IC image URL, License image URL, and Payment Receipt image URL from this conversation history. 
-Look for patterns like [IMAGE_RECEIPT: url] or [DOCUMENT_RECEIPT: url].
+Look for patterns like [UPLOADED_IMAGE: url] or [UPLOADED_DOCUMENT: url] or [IMAGE_RECEIPT: url].
 Return ONLY a valid JSON object with keys: "vehicle_model", "pickup_date", "pickup_time", "price", "duration", "ic_url", "license_url", "receipt_url". 
 If you cannot find a value, use null. Do not include markdown formatting. 
 Conversation: ${JSON.stringify(contents)}`;
