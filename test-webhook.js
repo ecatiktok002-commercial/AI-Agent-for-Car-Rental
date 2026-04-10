@@ -10,7 +10,7 @@ const payload = {
               {
                 "from": "1234567890",
                 "text": {
-                  "body": "hai, i nak sewa Axia esok, ada kosong tak?"
+                  "body": "hi, ada axia kosong tak 14hb?"
                 },
                 "type": "text"
               }

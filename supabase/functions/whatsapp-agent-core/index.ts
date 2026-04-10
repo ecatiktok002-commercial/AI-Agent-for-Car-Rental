@@ -1119,7 +1119,9 @@ TOOL USAGE RULES:
                   console.error("RPC Error (Availability):", error.message);
                   toolResult = { error: error.message };
                 } else {
-                  toolResult = data || { available: false, message: "No data returned from system." };
+                  toolResult = typeof data === 'boolean' || typeof data === 'string' || typeof data === 'number' 
+                    ? { result: data } 
+                    : (data || { available: false, message: "No data returned from system." });
                 }
               } else {
                 toolResult = { error: "External Supabase keys not configured." };
