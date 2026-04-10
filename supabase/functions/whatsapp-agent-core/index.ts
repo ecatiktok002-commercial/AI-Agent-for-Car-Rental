@@ -1107,7 +1107,7 @@ TOOL USAGE RULES:
             try {
               if (extSupabase) {
                 const { data, error } = await extSupabase.rpc('check_car_availability', {
-                  p_car_model: args.car_model,
+                  p_model: args.car_model,
                   p_date: args.date,
                   p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
                 });
