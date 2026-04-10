@@ -82,6 +82,7 @@ export default function BookingsPage() {
             <tr className="bg-slate-50 border-b border-slate-200">
               <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Customer</th>
               <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Booking Info</th>
+              <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Documents</th>
               <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Status</th>
               <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Action</th>
             </tr>
@@ -114,6 +115,30 @@ export default function BookingsPage() {
                   </div>
                 </td>
                 <td className="px-6 py-4">
+                  <div className="flex gap-2">
+                    {lead.ic_url ? (
+                      <a href={lead.ic_url} target="_blank" rel="noreferrer" className="group relative">
+                        <img src={lead.ic_url} alt="IC" className="w-10 h-10 rounded border border-slate-200 object-cover hover:scale-110 transition-transform" />
+                        <span className="absolute -top-8 left-0 hidden group-hover:block bg-slate-800 text-white text-[10px] px-2 py-1 rounded">IC</span>
+                      </a>
+                    ) : <div className="w-10 h-10 rounded border border-dashed border-slate-200 flex items-center justify-center text-[10px] text-slate-300">No IC</div>}
+                    
+                    {lead.license_url ? (
+                      <a href={lead.license_url} target="_blank" rel="noreferrer" className="group relative">
+                        <img src={lead.license_url} alt="License" className="w-10 h-10 rounded border border-slate-200 object-cover hover:scale-110 transition-transform" />
+                        <span className="absolute -top-8 left-0 hidden group-hover:block bg-slate-800 text-white text-[10px] px-2 py-1 rounded">Lic</span>
+                      </a>
+                    ) : <div className="w-10 h-10 rounded border border-dashed border-slate-200 flex items-center justify-center text-[10px] text-slate-300">No Lic</div>}
+                    
+                    {lead.receipt_url ? (
+                      <a href={lead.receipt_url} target="_blank" rel="noreferrer" className="group relative">
+                        <img src={lead.receipt_url} alt="Receipt" className="w-10 h-10 rounded border border-slate-200 object-cover hover:scale-110 transition-transform" />
+                        <span className="absolute -top-8 left-0 hidden group-hover:block bg-slate-800 text-white text-[10px] px-2 py-1 rounded">Pay</span>
+                      </a>
+                    ) : <div className="w-10 h-10 rounded border border-dashed border-slate-200 flex items-center justify-center text-[10px] text-slate-300">No Pay</div>}
+                  </div>
+                </td>
+                <td className="px-6 py-4">
                   <Badge variant={lead.status === 'Done' ? 'success' : 'warning'}>
                     {lead.status}
                   </Badge>
@@ -138,14 +163,14 @@ export default function BookingsPage() {
             ))}
             {!loading && leads.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-6 py-12 text-center text-slate-400 italic">
+                <td colSpan={5} className="px-6 py-12 text-center text-slate-400 italic">
                   No bookings found in the database.
                 </td>
               </tr>
             )}
             {loading && leads.length === 0 && (
               <tr>
-                <td colSpan={4} className="px-6 py-12 text-center text-slate-400">
+                <td colSpan={5} className="px-6 py-12 text-center text-slate-400">
                   <div className="flex items-center justify-center gap-2">
                     <RefreshCw className="w-5 h-5 animate-spin text-blue-500" />
                     <span className="text-sm text-slate-500">Loading bookings...</span>

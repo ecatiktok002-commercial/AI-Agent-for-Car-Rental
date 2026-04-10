@@ -11,10 +11,10 @@ const GEMINI_API_KEY = Deno.env.get("GEMINI_API_KEY");
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL");
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
 
-// ADD THESE 3 LINES:
-const EXT_URL = Deno.env.get("EXTERNAL_SUPABASE_URL");
-const EXT_KEY = Deno.env.get("EXTERNAL_SUPABASE_ANON_KEY");
-const extSupabase = EXT_URL && EXT_KEY ? createClient(EXT_URL, EXT_KEY) : null;
+// External Supabase Configuration (Hardcoded as requested)
+const EXT_URL = Deno.env.get("EXTERNAL_SUPABASE_URL") || "https://czurhanyrjgeicnbrnev.supabase.co";
+const EXT_KEY = Deno.env.get("EXTERNAL_SUPABASE_ANON_KEY") || "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN6dXJoYW55cmpnZWljbmJybmV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE4NTExMDEsImV4cCI6MjA4NzQyNzEwMX0.LV4hsQEazpbv8AcLDrEASg8s3uGKmvMJ0FrvMOX6AWQ";
+const extSupabase = createClient(EXT_URL, EXT_KEY);
 
 // Initialize Supabase client
 const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
@@ -720,7 +720,7 @@ serve(async (req) => {
                   ? keywordSettings.value.split(',').map((k: string) => k.trim().toLowerCase()).filter((k: string) => k.length > 0)
                   : [];
 
-                const aiResponse = await generateAIResponse(text, customerName, from, personaInstructions, agentName, history?.reverse().slice(0, -1), referenceSnippets);
+                const aiResponse = await generateAIResponse(text, customerName, from, ticket.id, personaInstructions, agentName, history?.reverse().slice(0, -1), referenceSnippets);
                 
                 // Check for handover intent or AI-triggered escalation
                 const defaultKeywords = ["human", "agent", "person", "staff", "speak to someone", "talk to someone", "orang", "staf", "admin", "bantuan"];
@@ -826,7 +826,7 @@ async function sendWhatsAppMessage(to: string, text: string) {
 }
 
 // Helper: Generate AI Response using Gemini
-async function generateAIResponse(userInput: string, customerName: string, customerPhone: string, customPersona?: string, agentName?: string, history: any[] = [], referenceSnippets?: string) {
+async function generateAIResponse(userInput: string, customerName: string, customerPhone: string, ticketId: string, customPersona?: string, agentName?: string, history: any[] = [], referenceSnippets?: string) {
   // Initialize GoogleGenAI
   const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY || '' });
   
@@ -1004,7 +1004,10 @@ BOOKING WORKFLOW RULE:
         pickup_date: { type: Type.STRING, description: "The date of pickup." },
         pickup_time: { type: Type.STRING, description: "The time of pickup." },
         price: { type: Type.STRING, description: "The price of the rental." },
-        duration: { type: Type.STRING, description: "The duration of the rental." }
+        duration: { type: Type.STRING, description: "The duration of the rental." },
+        ic_url: { type: Type.STRING, description: "The URL of the IC image." },
+        license_url: { type: Type.STRING, description: "The URL of the License image." },
+        receipt_url: { type: Type.STRING, description: "The URL of the Payment Receipt image." }
       },
       required: ["vehicle_model", "pickup_date", "pickup_time", "price", "duration"],
     },
@@ -1018,8 +1021,8 @@ BOOKING WORKFLOW RULE:
 
     // NEW: Helper function to automatically switch models on failure
     const callGeminiWithFallback = async (requestParams: any) => {
-      const primaryModel = "gemini-1.5-flash";
-      const fallbackModel = "gemini-2.0-flash"; // Reliable, stable production model
+      const primaryModel = "gemini-3.1-flash-lite-preview";
+      const fallbackModel = "gemini-3-flash-preview";
       
       try {
         return await ai.models.generateContent({
@@ -1028,7 +1031,6 @@ BOOKING WORKFLOW RULE:
         });
       } catch (error: any) {
         console.warn(`⚠️ Primary model (${primaryModel}) failed: ${error.message}. Rerouting to fallback (${fallbackModel})...`);
-        // If the preview model fails (503), instantly try the stable model
         return await ai.models.generateContent({
           ...requestParams,
           model: fallbackModel
@@ -1125,13 +1127,16 @@ BOOKING WORKFLOW RULE:
             
             // 1. Save to the Bookings database
             const bookingData = {
-              ticket_id: ticket.id,
+              ticket_id: ticketId,
               customer_phone: customerPhone,
               vehicle_model: args.vehicle_model,
               pickup_date: args.pickup_date,
               pickup_time: args.pickup_time,
               price: args.price,
               duration: args.duration,
+              ic_url: args.ic_url,
+              license_url: args.license_url,
+              receipt_url: args.receipt_url,
               status: 'Pending'
             };
 
@@ -1143,7 +1148,7 @@ BOOKING WORKFLOW RULE:
             }
             
             // Update the ticket tag
-            await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticket.id);
+            await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticketId);
 
             // 2. Send Email Notification to Admin
             const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
@@ -1225,7 +1230,7 @@ BOOKING WORKFLOW RULE:
     }
     
     if (!aiResponseText) {
-       console.error("Gemini API returned no text.");
+       console.error("Gemini API returned no text. Full response:", JSON.stringify(response));
        return "Kejap ya, I check dulu... [NEEDS_AGENT]";
     }
     
@@ -1254,20 +1259,33 @@ BOOKING WORKFLOW RULE:
         const { data: existingLead } = await supabase
           .from('booking_leads')
           .select('id')
-          .eq('ticket_id', ticket.id)
+          .eq('ticket_id', ticketId)
           .maybeSingle();
 
         if (!existingLead) {
           console.log("Auto-capturing booking details from conversation...");
           // Extract details using a quick Gemini call
-          const extractionPrompt = `Extract the vehicle model, pickup date, pickup time, price, and duration from this conversation history. Return ONLY a valid JSON object with keys: "vehicle_model", "pickup_date", "pickup_time", "price", "duration". If you cannot find a value, use "Unknown". Do not include markdown formatting. Conversation: ${JSON.stringify(contents)}`;
+          const extractionPrompt = `Extract the vehicle model, pickup date, pickup time, price, duration, IC image URL, License image URL, and Payment Receipt image URL from this conversation history. 
+Look for patterns like [IMAGE_RECEIPT: url] or [DOCUMENT_RECEIPT: url].
+Return ONLY a valid JSON object with keys: "vehicle_model", "pickup_date", "pickup_time", "price", "duration", "ic_url", "license_url", "receipt_url". 
+If you cannot find a value, use null. Do not include markdown formatting. 
+Conversation: ${JSON.stringify(contents)}`;
           
           const extraction = await ai.models.generateContent({
             model: "gemini-1.5-flash",
             contents: extractionPrompt
           });
           
-          let details = { vehicle_model: "Unknown", pickup_date: "Unknown", pickup_time: "Unknown", price: "Unknown", duration: "Unknown" };
+          let details = { 
+            vehicle_model: "Unknown", 
+            pickup_date: "Unknown", 
+            pickup_time: "Unknown", 
+            price: "Unknown", 
+            duration: "Unknown",
+            ic_url: null,
+            license_url: null,
+            receipt_url: null
+          };
           try {
             const jsonStr = extraction.text?.replace(/```json/g, '').replace(/```/g, '').trim() || "{}";
             details = JSON.parse(jsonStr);
@@ -1277,18 +1295,21 @@ BOOKING WORKFLOW RULE:
 
           // Insert into booking_leads with all available info
           await supabase.from('booking_leads').insert([{
-            ticket_id: ticket.id,
+            ticket_id: ticketId,
             customer_phone: customerPhone,
             vehicle_model: details.vehicle_model || "Auto-captured",
             pickup_date: details.pickup_date || "Auto-captured",
             pickup_time: details.pickup_time || "Auto-captured",
             price: details.price || "Auto-captured",
             duration: details.duration || "Auto-captured",
+            ic_url: details.ic_url,
+            license_url: details.license_url,
+            receipt_url: details.receipt_url,
             status: 'Pending'
           }]);
           
           // Update ticket tag
-          await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticket.id);
+          await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticketId);
         }
       } catch (fallbackErr) {
         console.error("Auto-capture fallback failed:", fallbackErr);

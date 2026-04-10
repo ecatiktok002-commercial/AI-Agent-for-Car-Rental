@@ -87,6 +87,9 @@ export interface BookingLead {
   pickup_time: string;
   price: string;
   duration: string;
+  ic_url?: string;
+  license_url?: string;
+  receipt_url?: string;
   status: 'Pending' | 'Done';
   created_at: string;
   tickets?: {

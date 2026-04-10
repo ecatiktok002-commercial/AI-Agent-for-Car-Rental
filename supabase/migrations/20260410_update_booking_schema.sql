@@ -15,6 +15,9 @@ CREATE TABLE public.booking_leads (
     pickup_time TEXT NOT NULL,
     price TEXT NOT NULL,
     duration TEXT NOT NULL,
+    ic_url TEXT,
+    license_url TEXT,
+    receipt_url TEXT,
     status TEXT DEFAULT 'Pending' CHECK (status IN ('Pending', 'Done')),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     ticket_id UUID REFERENCES public.tickets(id) ON DELETE SET NULL
