@@ -971,6 +971,26 @@ BOOKING WORKFLOW RULE:
       Duration: [Number] days
    b. In the SAME message, instruct the customer to make the payment and upload 3 items: IC, Driving License, and Payment Receipt. You MUST include the exact text "[SEND_QR]" so the system attaches the QR code.
 3. Wait for the customer to upload the documents. (Documents will appear in your prompt as [IMAGE_RECEIPT: url] or [DOCUMENT_RECEIPT: url]).
+
+RECEIPT VALIDATION RULE (DATE CRITERIA):
+When the customer sends an image (which appears in text as [IMAGE_RECEIPT: url]), you must act as a strict validator. Look closely at the image for a PAYMENT DATE.
+1. If you can clearly see a payment date AND the image looks like a transaction receipt, you MUST immediately call the 'request_human_approval' tool.
+2. If there is NO date visible in the image, or it is clearly a random photo (e.g., a selfie, a car photo, or a blurry doc), DO NOT call the tool. Instead, reply politely in your persona: "Sorry boss, I tak nampak tarikh/masa bayaran dekat gambar ni. Boleh tolong hantar gambar resit penuh yang nampak tarikh hari ni tak? 🙏"
+
+IC VALIDATION RULE:
+When the customer sends an image for their IC, look closely for the keyword "MyKad".
+1. If "MyKad" is visible, accept it as a valid IC.
+2. If NOT visible, or it's a random photo, reply: "Sorry boss, gambar IC ni macam tak jelas la. Boleh tolong hantar gambar MyKad yang nampak jelas tak? 🙏"
+
+LICENSE VALIDATION RULE:
+When the customer sends an image for their Driving License, look for "Lesen Memandu" or "Driving License".
+1. If either is visible, accept it as a valid License.
+2. If NOT visible, reply: "Boss, gambar lesen ni macam bukan lesen memandu la. Boleh tolong hantar gambar Lesen Memandu yang nampak jelas tak? Mekasih! 🚗"
+
+PDF DOCUMENT RULE:
+If the customer uploads a document/PDF instead of an image (which will appear in the chat as [DOCUMENT_RECEIPT: url] or contain a .pdf extension), DO NOT call the approval tool. The system cannot process PDFs for receipts. 
+Instead, reply politely: "Boss, sistem I tak boleh baca file PDF/Document la buat masa ni. Boleh tolong open PDF tu, buat screenshot, lepas tu hantar sebagai gambar (photo) biasa tak? Mekasih boss! 🚗"
+
 4. Once you see the documents AND the customer confirms (e.g., "done", "dah", "confirm", "jadi"), you MUST call the 'save_booking_lead' tool with the details from the summary.
 5. After the tool succeeds, reply to the customer confirming the booking is secured and that a human agent will verify the documents shortly. Reply in your assigned persona.
 
@@ -1026,6 +1046,18 @@ TOOL USAGE RULES:
         },
       };
 
+      const requestHumanApprovalDeclaration: FunctionDeclaration = {
+        name: "request_human_approval",
+        description: "Request a human agent to verify a payment receipt image. ONLY call this tool if you have confirmed the image is a payment receipt containing banking transaction details, payment confirmation, or a QR pay success screen with a visible date.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            receipt_url: { type: Type.STRING, description: "The URL of the payment receipt image to be verified." }
+          },
+          required: ["receipt_url"],
+        },
+      };
+
       // Helper function to automatically switch models on failure
       const callGeminiWithFallback = async (requestParams: any) => {
         const primaryModel = "gemini-3.1-flash-lite-preview";
@@ -1053,7 +1085,7 @@ TOOL USAGE RULES:
           temperature: 0.7,
           topK: 40,
           topP: 0.95,
-          tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
+          tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration] }],
         }
       });
 
@@ -1178,6 +1210,17 @@ TOOL USAGE RULES:
               console.error("❌ Booking Save Error:", err.message);
               toolResult = { error: err.message };
             }
+          } else if (call.name === "request_human_approval") {
+            toolCalled = true;
+            const args = call.args as any;
+            try {
+              console.log("🚀 Requesting human approval for receipt:", args.receipt_url);
+              await supabase.from('tickets').update({ tag: 'Receipt Verification', status: 'waiting_agent' }).eq('id', ticketId);
+              toolResult = { success: true, message: "Human agent notified for receipt verification." };
+            } catch (e: any) {
+              console.error("❌ Approval Request Error:", e.message);
+              toolResult = { error: e.message };
+            }
           }
 
           if (toolCalled) {
@@ -1205,7 +1248,7 @@ TOOL USAGE RULES:
               temperature: 0.7,
               topK: 40,
               topP: 0.95,
-              tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration] }],
+              tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration] }],
             }
           });
         } else {

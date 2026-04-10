@@ -29,6 +29,7 @@ export default function AgentsPage() {
   const [searchTerm, setSearchTerm] = useState('');
   const [agents, setAgents] = useState<Agent[]>([]);
   const [editingAgent, setEditingAgent] = useState<Agent | null>(null);
+  const [isCreating, setIsCreating] = useState(false);
   const [deletingAgent, setDeletingAgent] = useState<Agent | null>(null);
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -167,6 +168,27 @@ export default function AgentsPage() {
 
   const handleSaveAgent = async (updatedAgent: Agent) => {
     try {
+      if (isCreating) {
+        // Handle Creation
+        const { id, active_tickets, ...agentData } = updatedAgent;
+        const { data, error } = await supabase
+          .from('agents')
+          .insert([{
+            ...agentData,
+            is_approved: true, // Auto-approve if created by admin
+            status: 'online'
+          }])
+          .select()
+          .single();
+
+        if (error) throw error;
+        
+        showToast('New persona created successfully');
+        setIsCreating(false);
+        fetchAgents();
+        return;
+      }
+
       // Handle Update
       // Optimistic update
       const originalAgents = [...agents];
@@ -207,6 +229,13 @@ export default function AgentsPage() {
           <h1 className="text-3xl font-black text-slate-900 tracking-tight">Team Personas</h1>
           <p className="text-slate-500 font-medium">Manage your support agents and their AI mirroring settings.</p>
         </div>
+        <button 
+          onClick={() => setIsCreating(true)}
+          className="flex items-center gap-2 px-6 py-3 bg-black text-white rounded-2xl font-bold text-sm hover:bg-slate-800 transition-all shadow-lg shadow-slate-200 active:scale-95"
+        >
+          <Plus className="w-5 h-5" />
+          Create New Persona
+        </button>
       </div>
 
       <div className="relative max-w-md">
@@ -413,6 +442,29 @@ export default function AgentsPage() {
           isOpen={!!editingAgent}
           isNew={false}
           onClose={() => setEditingAgent(null)}
+          onSave={handleSaveAgent}
+        />
+      )}
+
+      {isCreating && (
+        <EditAgentModal 
+          agent={{
+            name: '',
+            username: '',
+            role: 'agent',
+            tone_style: 'friendly',
+            emoji_level: 'medium',
+            ai_mirroring_enabled: true,
+            response_style_rules: {
+              useStructuredReplies: true,
+              useShortSentences: false,
+              addEmojisAutomatically: true,
+              formalLanguageMode: false
+            }
+          } as any}
+          isOpen={isCreating}
+          isNew={true}
+          onClose={() => setIsCreating(false)}
           onSave={handleSaveAgent}
         />
       )}
