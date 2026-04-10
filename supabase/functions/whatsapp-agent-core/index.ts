@@ -1231,7 +1231,9 @@ TOOL USAGE RULES:
               await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticketId);
 
               const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
-              const ADMIN_EMAIL = Deno.env.get("ADMIN_EMAIL") || "ecatiktok002@gmail.com";
+              // Force the email to the user's actual email to prevent misconfigured secrets from breaking it
+              const ADMIN_EMAIL = "ecatiktok002@gmail.com";
+              const FROM_EMAIL = Deno.env.get("RESEND_FROM_EMAIL") || "onboarding@resend.dev";
 
               if (RESEND_API_KEY) {
                 try {
@@ -1242,8 +1244,8 @@ TOOL USAGE RULES:
                       "Content-Type": "application/json"
                     },
                     body: JSON.stringify({
-                      from: "ECA Car Rental <onboarding@resend.dev>",
-                      to: ADMIN_EMAIL,
+                      from: `ECA Car Rental <${FROM_EMAIL}>`,
+                      to: [ADMIN_EMAIL],
                       subject: `🚨 New Booking: ${args.vehicle_model}`,
                       html: `
                         <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
