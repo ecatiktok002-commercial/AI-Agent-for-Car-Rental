@@ -779,6 +779,11 @@ serve(async (req) => {
             }
           })();
 
+          if (from === "1234567890") {
+            // We can't return from inside the IIFE, but we can just let it run.
+            // Actually, the IIFE is not awaited, so we can't return the result here easily.
+          }
+
           return new Response("EVENT_RECEIVED", { status: 200, headers: corsHeaders });
         }
         
@@ -859,6 +864,23 @@ ${formattedFacts}`;
       const greetingRule = isFirstMessage 
         ? "* This is the FIRST message. Start with a warm greeting (e.g., 'Hii!', 'Salam', 'hi awak!')."
         : "* This is an ONGOING conversation. DO NOT greet the customer again. Jump straight to the answer.";
+
+      // Helper function to automatically switch models on failure
+      const callGeminiWithFallback = async (requestParams: any) => {
+        const models = ["gemini-2.5-flash", "gemini-1.5-flash"];
+        for (let i = 0; i < models.length; i++) {
+          try {
+            return await ai.models.generateContent({
+              ...requestParams,
+              model: models[i]
+            });
+          } catch (error: any) {
+            console.warn(`⚠️ Model (${models[i]}) failed: ${error.message}.`);
+            if (i === models.length - 1) throw error;
+          }
+        }
+        throw new Error("All models failed");
+      };
 
       const conversationFlowRule = `
 CONVERSATION RULES (STRICT):
@@ -1059,8 +1081,7 @@ TOOL USAGE RULES:
       };
 
       // 1. First AI Call
-      let response = await ai.models.generateContent({
-        model: "gemini-2.0-flash",
+      let response = await callGeminiWithFallback({
         contents: contents,
         config: {
           systemInstruction: finalBasePrompt,
@@ -1223,8 +1244,7 @@ TOOL USAGE RULES:
             parts: functionResponseParts
           });
 
-          response = await ai.models.generateContent({
-            model: "gemini-2.0-flash",
+          response = await callGeminiWithFallback({
             contents: contents,
             config: {
               systemInstruction: finalBasePrompt,
@@ -1284,8 +1304,7 @@ Return ONLY a valid JSON object with keys: "vehicle_model", "pickup_date", "pick
 If you cannot find a value, use null. Do not include markdown formatting. 
 Conversation: ${JSON.stringify(contents)}`;
             
-            const extraction = await ai.models.generateContent({
-              model: "gemini-2.0-flash",
+            const extraction = await callGeminiWithFallback({
               contents: extractionPrompt
             });
             
@@ -1331,20 +1350,20 @@ Conversation: ${JSON.stringify(contents)}`;
 
     } catch (error: any) {
       lastError = error;
-      const isQuotaError = error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED") || (error.status === 429);
+      const isQuotaOrAuthError = error.message?.includes("429") || error.message?.includes("RESOURCE_EXHAUSTED") || (error.status === 429) || error.message?.includes("403") || error.message?.includes("PERMISSION_DENIED") || (error.status === 403) || error.message?.includes("404") || error.message?.includes("NOT_FOUND");
       
-      if (isQuotaError && attempts < maxAttempts && GEMINI_BACKUP_KEY) {
-        console.log("⚠️ Free Tier Exhausted. Retrying with Paid Backup Key...");
+      if (isQuotaOrAuthError && attempts < maxAttempts && GEMINI_BACKUP_KEY) {
+        console.log("⚠️ Primary Key Failed (Quota/Auth/404). Retrying with Backup Key...");
         currentKey = GEMINI_BACKUP_KEY;
         continue;
       }
       
       console.error("Gemini Fetch Error:", error);
-      return "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]";
+      return `Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]`;
     }
   }
   
-  return "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]";
+  return `Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]`;
 }
 
 async function sendWhatsAppImage(to: string, imageUrl: string) {
