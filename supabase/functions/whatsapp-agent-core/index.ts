@@ -1031,6 +1031,9 @@ Reply to the customer message exactly as ${agentName} would.`;
       const todayDate = new Date().toISOString().split('T')[0];
       const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.
 
+DATE LOGIC RULE:
+If a customer requests a booking for a date that is BEFORE today's date (${todayDate}), you MUST politely reject it. DO NOT call the availability tool for past dates. Tell them: "Alamak boss, tarikh tu dah lepas la. Boleh bagi tarikh lain yang akan datang tak? 😊"
+
 BOOKING WORKFLOW RULE:
 1. AVAILABILITY CHECK: If a customer asks if a car is available ("Ada kosong tak?", "Available?", etc.) or asks for a list of cars, you MUST use the 'get_car_availability' or 'get_all_cars' tools.
 2. When a customer agrees to book a car, you MUST follow these exact steps in order:
