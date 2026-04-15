@@ -1150,10 +1150,11 @@ TOOL USAGE RULES:
             const args = call.args as any;
             try {
               if (extSupabase) {
+                const subscriberId = Deno.env.get("EXTERNAL_SUBSCRIBER_ID") || 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
                 const { data, error } = await extSupabase.rpc('check_car_availability', {
                   p_model: args.car_model,
                   p_date: args.date,
-                  p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
+                  p_subscriber_id: subscriberId
                 });
 
                 if (error) {
@@ -1175,8 +1176,9 @@ TOOL USAGE RULES:
             toolCalled = true;
             try {
               if (extSupabase) {
+                const subscriberId = Deno.env.get("EXTERNAL_SUBSCRIBER_ID") || 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
                 const { data, error } = await extSupabase.rpc('get_all_car_models', {
-                  p_subscriber_id: 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd'
+                  p_subscriber_id: subscriberId
                 });
 
                 if (error) {
