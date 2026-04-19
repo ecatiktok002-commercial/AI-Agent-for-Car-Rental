@@ -131,8 +131,8 @@ export default function AdminDashboard() {
   }
 
   return (
-    <div className="p-8 space-y-8 max-w-7xl mx-auto">
-      <div className="flex justify-between items-start">
+    <div className="p-4 md:p-8 space-y-6 md:space-y-8 max-w-7xl mx-auto">
+      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">Dashboard Overview</h1>
           <p className="text-slate-500">Welcome back, here's what's happening today.</p>
@@ -150,7 +150,7 @@ export default function AdminDashboard() {
       </div>
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
         {statCards.map((stat) => (
           <Link 
             key={stat.label} 
@@ -178,11 +178,11 @@ export default function AdminDashboard() {
       </div>
 
       {/* Recent Tickets Table */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-center gap-4">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm w-full overflow-hidden">
+        <div className="p-4 md:p-6 border-b border-slate-100 flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex flex-col sm:flex-row sm:items-center gap-4">
             <h2 className="text-lg font-bold text-slate-900">Recent Tickets</h2>
-            <div className="flex p-1 bg-slate-100 rounded-xl">
+            <div className="flex p-1 bg-slate-100 rounded-xl w-full sm:w-auto overflow-x-auto shrink-0">
               <button
                 onClick={() => setTicketFilter('mine')}
                 className={cn(
@@ -207,12 +207,12 @@ export default function AdminDashboard() {
               </button>
             </div>
           </div>
-          <Link to="/admin/tickets" className="text-sm font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1">
+          <Link to="/admin/tickets" className="text-sm font-medium text-blue-600 hover:text-blue-700 flex items-center gap-1 self-start sm:self-auto shrink-0">
             View all <ArrowUpRight className="w-4 h-4" />
           </Link>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse">
+        <div className="w-full overflow-x-auto">
+          <table className="w-full text-left border-collapse min-w-[600px]">
             <thead>
               <tr className="bg-slate-50/50">
                 <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Customer</th>
@@ -245,7 +245,7 @@ export default function AdminDashboard() {
                         {ticket.status === 'ai_handling' 
                           ? `AI ${ticket.assigned_agent?.name?.split(' ')[0] || 'Agent'}` 
                           : ticket.status === 'waiting_assignment'
-                            ? `Waiting for ${ticket.assigned_agent?.name?.split(' ')[0] || 'Agent'}`
+                            ? `Needs Assignment`
                             : `Agent ${ticket.assigned_agent?.name?.split(' ')[0] || 'Agent'}`}
                       </Badge>
                     </td>

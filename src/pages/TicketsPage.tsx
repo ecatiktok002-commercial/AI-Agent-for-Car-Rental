@@ -609,8 +609,12 @@ export default function TicketsPage() {
 
   return (
     <div className="flex h-[calc(100vh-0px)] overflow-hidden bg-white">
-      {/* Left: Ticket List */}
-      <div className="w-80 border-r border-slate-200 flex flex-col bg-slate-50/30">
+        {/* Left: Ticket List */}
+      <div className={cn(
+        "border-r border-slate-200 flex-col bg-slate-50/30 transition-all",
+        "w-full md:w-80",
+        selectedTicketId ? "hidden md:flex" : "flex"
+      )}>
         <div className="p-4 border-b border-slate-200 space-y-4">
           <div className="flex justify-between items-center">
             <h2 className="text-lg font-bold text-slate-900">Tickets</h2>
@@ -723,11 +727,20 @@ export default function TicketsPage() {
 
       {/* Right: Chat Panel */}
       {selectedTicket ? (
-        <div className="flex-1 flex flex-col min-w-0 bg-white">
+        <div className={cn(
+          "flex-1 flex-col min-w-0 bg-white transition-all",
+          selectedTicketId ? "flex" : "hidden md:flex"
+        )}>
           {/* Chat Header */}
-          <div className="h-16 border-b border-slate-200 px-6 flex items-center justify-between bg-white/80 backdrop-blur-sm z-10">
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200 overflow-hidden">
+          <div className="h-16 border-b border-slate-200 px-4 md:px-6 flex items-center justify-between bg-white/80 backdrop-blur-sm z-10 shrink-0">
+            <div className="flex items-center gap-2 md:gap-3">
+              <button 
+                onClick={() => setSelectedTicketId(null)}
+                className="md:hidden p-2 -ml-2 text-slate-500 hover:bg-slate-100 rounded-lg mr-1"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+              </button>
+              <div className="w-8 h-8 md:w-10 md:h-10 rounded-full bg-slate-100 flex items-center justify-center border border-slate-200 overflow-hidden shrink-0">
                 <img 
                   src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${selectedTicket.customer?.phone_number}`} 
                   alt="Customer" 
@@ -749,10 +762,10 @@ export default function TicketsPage() {
               </div>
             </div>
 
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-2 mr-4 bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200">
+            <div className="flex items-center gap-2 md:gap-3">
+              <div className="flex items-center gap-1 md:gap-2 mr-1 md:mr-4 bg-slate-50 px-2 md:px-3 py-1 md:py-1.5 rounded-xl border border-slate-200">
                 <span 
-                  className="text-xs font-semibold text-slate-600"
+                  className="hidden sm:inline-block text-[10px] md:text-xs font-semibold text-slate-600"
                   title={(selectedTicket.handled_by || 'ai') === 'ai' ? 'Bot is active' : 'Bot is paused'}
                 >
                   {(selectedTicket.handled_by || 'ai') === 'ai' ? 'AI Handling' : 'Agent Handling'}
@@ -760,7 +773,7 @@ export default function TicketsPage() {
                 <button
                   onClick={handleToggleBot}
                   className={cn(
-                    "relative inline-flex h-5 w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2",
+                    "relative inline-flex h-4 w-7 md:h-5 md:w-9 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 shrink-0",
                     (selectedTicket.handled_by || 'ai') === 'ai' ? 'bg-emerald-500' : 'bg-slate-300'
                   )}
                 >
@@ -776,12 +789,12 @@ export default function TicketsPage() {
                 <button 
                   onClick={handleTakeOver}
                   disabled={isTakingOver}
-                  className="px-3 py-1.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-xl text-xs font-semibold hover:bg-indigo-100 transition-all flex items-center gap-2 disabled:opacity-50"
+                  className="px-2 md:px-3 py-1.5 bg-indigo-50 text-indigo-600 border border-indigo-200 rounded-xl text-[10px] md:text-xs font-semibold hover:bg-indigo-100 transition-all flex items-center gap-1 md:gap-2 disabled:opacity-50 shrink-0"
                 >
                   {isTakingOver ? (
                     <>
                       <Loader2 className="w-3 h-3 animate-spin" />
-                      Taking Over...
+                      <span className="hidden sm:inline">Taking Over...</span>
                     </>
                   ) : (
                     'Take Over'

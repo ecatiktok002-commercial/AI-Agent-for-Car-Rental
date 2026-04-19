@@ -53,16 +53,16 @@ export default function BookingsPage() {
   };
 
   return (
-    <div className="p-8 max-w-7xl mx-auto space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-4 md:p-8 max-w-7xl mx-auto space-y-4 md:space-y-6">
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Admin Bookings Dashboard</h1>
-          <p className="text-slate-500">Manage and verify customer car rental bookings.</p>
+          <h1 className="text-xl md:text-2xl font-bold text-slate-900">Admin Bookings Dashboard</h1>
+          <p className="text-sm md:text-base text-slate-500">Manage and verify customer car rental bookings.</p>
         </div>
         <button 
           onClick={fetchLeads}
           disabled={loading}
-          className="flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
+          className="flex items-center justify-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-lg text-sm font-medium text-slate-600 hover:bg-slate-50 transition-colors disabled:opacity-50"
         >
           <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin' : ''}`} />
           Refresh
@@ -76,8 +76,9 @@ export default function BookingsPage() {
         </div>
       )}
 
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <table className="w-full text-left border-collapse">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm w-full overflow-x-auto">
+        <div className="min-w-[800px]">
+          <table className="w-full text-left border-collapse">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
               <th className="px-6 py-4 text-xs font-semibold text-slate-500 uppercase tracking-wider">Customer</th>
@@ -180,6 +181,7 @@ export default function BookingsPage() {
             )}
           </tbody>
         </table>
+        </div>
       </div>
     </div>
   );
