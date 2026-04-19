@@ -573,6 +573,36 @@ serve(async (req) => {
                 .limit(1)
                 .single();
 
+              // --- NEW SESSION TIMEOUT LOGIC ---
+              // If we found an open ticket, check how old the last message is.
+              if (ticket) {
+                const { data: lastMsg } = await supabase
+                  .from("messages")
+                  .select("created_at")
+                  .eq("ticket_id", ticket.id)
+                  .order("created_at", { ascending: false })
+                  .limit(1)
+                  .single();
+
+                if (lastMsg) {
+                  const lastActivity = new Date(lastMsg.created_at).getTime();
+                  const now = new Date().getTime();
+                  const hoursDiff = (now - lastActivity) / (1000 * 60 * 60);
+
+                  // If inactive for > 12 hours, OR if it was a completed booking left pending for > 2 hours
+                  if (hoursDiff > 12 || (ticket.tag === 'Booking Pending' && hoursDiff > 2)) {
+                    console.log(`🎫 Auto-closing stale ticket ${ticket.id} for returning customer.`);
+                    await supabase
+                      .from("tickets")
+                      .update({ is_closed: true, closed_at: new Date().toISOString() })
+                      .eq("id", ticket.id);
+                    
+                    ticket = null; // This forces the code below to create a fresh ticket
+                  }
+                }
+              }
+              // -----------------------------
+
               if (!ticket) {
                 // 1. Fetch all active agents for round-robin
                 const { data: activeAgents } = await supabase
@@ -710,13 +740,35 @@ serve(async (req) => {
                   }
                 }
 
-                // Fetch last 10 messages for context
+                // Check if this is a returning repeat customer
+                let isRepeatCustomer = false;
+                const { data: pastBookings } = await supabase
+                  .from("booking_leads")
+                  .select("id")
+                  .eq("customer_phone", customer.phone_number)
+                  .eq("status", "DONE")
+                  .limit(1);
+
+                if (pastBookings && pastBookings.length > 0) {
+                  isRepeatCustomer = true;
+                  personaInstructions += `\n\n[CRITICAL RETENTION RULE] This is a returning customer who previously completed a car rental with us! YOU MUST welcome them back warmly (e.g., "Welcome back boss! / Hai boss, kembali lagi!"). Because their documentation is already in our system, do NOT ask them to upload their IC or Driver's License again. Just ask them what car they want to rent this time and confirm the dates/times.`;
+                }
+
+                // Fetch customer's all tickets to grab full historical context
+                const { data: allCustomerTickets } = await supabase
+                  .from("tickets")
+                  .select("id")
+                  .eq("customer_id", customer.id);
+                
+                const ticketIds = allCustomerTickets?.map(t => t.id) || [ticket.id];
+
+                // Fetch last 15 messages cross-ticket for memory
                 const { data: history } = await supabase
                   .from("messages")
                   .select("sender_type, message_text, created_at")
-                  .eq("ticket_id", ticket.id)
+                  .in("ticket_id", ticketIds)
                   .order("created_at", { ascending: false })
-                  .limit(10);
+                  .limit(15);
 
                 // Fetch handoff keywords from settings
                 const { data: keywordSettings } = await supabase
