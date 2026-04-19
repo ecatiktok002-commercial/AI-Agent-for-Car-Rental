@@ -1122,8 +1122,8 @@ ${referenceSnippets ? `\nSTYLE REFERENCE (Mimic this tone/vocabulary):\n${refere
 
 TIMEZONE RULE (CRITICAL):
 You are operating in Malaysia Time (GMT+8). The current local date is ${todayDate} and the current local time is ${currentTimeMYT}. 
-- NOTE: The external car database tool only supports checking availability by overarching Date (YYYY-MM-DD), NOT by specific hours.
-- Therefore, if a customer asks for a specific time, you must only pass the YYYY-MM-DD date to the system tool.
+- For get_car_availability: Pass ONLY the overarching Date (YYYY-MM-DD).
+- For find_nearest_available_time: Pass the LOCAL MALAYSIA TIME directly as YYYY-MM-DD HH:mm:00. The times returned by this tool are ALREADY in Malaysia Time (GMT+8). You MUST propose those EXACT returned times to the customer (do NOT add or subtract any hours).
 
 DATE LOGIC RULE:
 If a customer requests a booking for a date that is BEFORE today's date (${todayDate}), you MUST politely reject it. DO NOT call the availability tool for past dates. Tell them: "Alamak boss, tarikh tu dah lepas la. Boleh bagi tarikh lain yang akan datang tak? 😊"
@@ -1135,10 +1135,11 @@ DOMAIN & SAFETY RULES:
 
 TOOL & AVAILABILITY RULES:
 * If get_car_availability returns available: true, you say: "Ada boss! [Model] masih available untuk tarikh tu. Nak I proceed booking ke? 😊"
-* If get_car_availability reveals the car is unavailable: Tell the customer frankly that the car is fully booked for that day. 
-* You MUST ALSO use the get_car_availability tool to check OTHER vehicle models (e.g. Bezza, Saga, Axia) for the exact same date. You can call the tool multiple times to check different models. If another model is confirmed available, propose it!
-* Verified Example: "Alamak boss, [Model] untuk tarikh tu dah penuh. Boleh boss consider model [Alternative Model] tak? Model ni masih kosong!"
-* If the tool returns an error, use the stalling tactic: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT] (Tool failed: {extract the error message from the tool response here})" ONLY if the tool fails or a network error occurs.`;
+* If get_car_availability returns false for a specific date: You MUST immediately use the find_nearest_available_time tool to check exact hour availability. Do not reject the customer until you run this second check!
+* If find_nearest_available_time RETURNS the EXACT time requested by the customer: It means the car IS available! Say: "Berita baik boss! Lepas double check, pukul [Time] tu memang ada kosong untuk [Model]. Nak proceed booking terus?"
+* If find_nearest_available_time returns DIFFERENT times: Say: "Alamak boss, pukul [Requested Time] tu dah penuh. Tapi sistem tunjuk ada kosong pukul [New Time]. Boss nak consider waktu tu tak?"
+* You MUST ALSO use the get_car_availability tool to check OTHER vehicle models (e.g. Bezza, Saga, Axia) for the exact same date. You can call the tool multiple times to check different models. 
+* If the tool returns an error, use the stalling tactic: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]" ONLY if the tool fails or a network error occurs.`;
 
       const getCarAvailabilityDeclaration: FunctionDeclaration = {
         name: "get_car_availability",
@@ -1152,10 +1153,29 @@ TOOL & AVAILABILITY RULES:
             },
             date: {
               type: Type.STRING,
-              description: "The date to check availability for. MUST be strictly in YYYY-MM-DD format (no time). If the user asks for a specific time, just pass the overarching date YYYY-MM-DD based on today's date.",
+              description: "The date to check availability for. MUST be strictly in YYYY-MM-DD format (no time).",
             },
           },
           required: ["car_model", "date"],
+        },
+      };
+
+      const findNearestAvailableTimeDeclaration: FunctionDeclaration = {
+        name: "find_nearest_available_time",
+        description: "Find the nearest available pickup times for a specific car model when the exact requested time is fully booked.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            car_model: {
+              type: Type.STRING,
+              description: "The model of the car (e.g., Axia, Bezza, Saga).",
+            },
+            target_datetime: {
+              type: Type.STRING,
+              description: "The requested local Malaysia datetime to search around. MUST be in YYYY-MM-DD HH:mm:00 format.",
+            },
+          },
+          required: ["car_model", "target_datetime"],
         },
       };
 
@@ -1209,7 +1229,7 @@ TOOL & AVAILABILITY RULES:
         }
       };
 
-      const activeTools = [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration];
+      const activeTools = [getCarAvailabilityDeclaration, findNearestAvailableTimeDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration];
       
       if (ENABLE_SELF_LEARNING && agentName && agentName.toLowerCase() === "laila") {
         activeTools.push(suggestKnowledgeTool);
@@ -1266,8 +1286,8 @@ TOOL & AVAILABILITY RULES:
                   console.error("RPC Error (Availability):", error.message);
                   toolResult = { error: error.message };
                 } else {
-                  toolResult = typeof data === 'boolean' || typeof data === 'string' || typeof data === 'number' 
-                    ? { result: data } 
+                  toolResult = typeof data === 'boolean' 
+                    ? { available: data } 
                     : (data || { available: false, message: "No data returned from system." });
                 }
               } else {
@@ -1276,6 +1296,38 @@ TOOL & AVAILABILITY RULES:
             } catch (e: any) {
               console.error("Tool Execution Error (Availability):", e.message);
               toolResult = { error: e.message };
+            }
+          } else if (call.name === "find_nearest_available_time") {
+            toolCalled = true;
+            const args = call.args as any;
+            
+            let formattedModel = args.car_model;
+            if (formattedModel.toLowerCase().includes('saga')) formattedModel = 'Proton Saga';
+            if (formattedModel.toLowerCase().includes('bezza')) formattedModel = 'Perodua Bezza';
+            if (formattedModel.toLowerCase().includes('axia')) formattedModel = 'Perodua Axia';
+
+            try {
+              if (extSupabase) {
+                const subscriberId = Deno.env.get("EXTERNAL_SUBSCRIBER_ID") || 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
+                // NOTE TO ADMIN: You must create this new RPC on your external database!
+                const { data, error } = await extSupabase.rpc('find_nearest_available_time', {
+                  p_model: formattedModel,
+                  p_target_datetime: args.target_datetime,
+                  p_subscriber_id: subscriberId
+                });
+
+                if (error || !data) {
+                   // Fallback when RPC doesn't exist yet but we want to simulate failure without crushing bot
+                   toolResult = { error: "Development Notice: The RPC find_nearest_available_time does not exist on your external database yet. Please tell the customer frankly: 'Maaf boss, untuk masa terdekat ni admin kena check manual jap. Boleh tunggu sekejap?' [NEEDS_AGENT_OVERRIDE]" };
+                } else {
+                  toolResult = { available_times: data };
+                }
+              } else {
+                toolResult = { error: "External Supabase keys not configured." };
+              }
+            } catch (err: any) {
+              console.error("External RPC Network Error (Nearest Times):", err.message);
+              toolResult = { error: err.message };
             }
           } else if (call.name === "get_all_cars") {
             toolCalled = true;
