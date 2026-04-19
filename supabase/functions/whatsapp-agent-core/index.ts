@@ -1029,25 +1029,18 @@ ${greetingRule}
   If get_all_cars returns a list of cars, list them nicely to the customer.
   If the tool completely fails, output: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]"`;
 
-      let basePrompt = `${knowledgeBaseBlock}
-${conversationFlowRule}
+      const assignedName = agentName || "ECA Support";
+      const assignedPersona = customPersona || "Professional, polite, and welcoming in standard Malay/English.";
 
-${globalPrompt}`;
+      const dynamicPersonaContext = `=== YOUR ASSIGNED IDENTITY ===
+Your Name: ${assignedName}
+Your Specific Personality & Tone: ${assignedPersona}
 
-      if (customPersona) {
-        basePrompt += `\n\n--- AGENT PERSONA OVERRIDE ---\n`;
-        basePrompt += `CRITICAL INSTRUCTION: You are NO LONGER a generic assistant. You are now acting as the AI First-Responder for ${agentName}. 
-* You MUST completely adopt their exact tone, vocabulary, slang, and style.
-* IGNORE any previous instructions to be "professional" if it conflicts with this persona.
-* Do NOT prefix your response with your name (e.g., do not start with "${agentName}:"). 
-* Do not announce yourself as an AI. 
+You MUST speak exactly like ${assignedName} using the tone described above. 
+Do NOT use a generic AI tone. Translate the SOP steps into your specific personality.
+${referenceSnippets ? `\nSTYLE REFERENCE (Mimic this tone/vocabulary):\n${referenceSnippets}\n` : ''}==============================`;
 
-AGENT PERSONALITY GUIDE:
-${customPersona}
-
-${referenceSnippets ? `STYLE REFERENCE (Mimic this tone/vocabulary):\n${referenceSnippets}\n` : ''}
-Reply to the customer message exactly as ${agentName} would.`;
-      }
+      let basePrompt = `${dynamicPersonaContext}\n\n${globalPrompt}\n\n${knowledgeBaseBlock}\n${conversationFlowRule}`;
 
       // Format history for Gemini contents array
       const rawContents: { role: string, text: string }[] = [];
@@ -1120,37 +1113,11 @@ Reply to the customer message exactly as ${agentName} would.`;
 
       // Add a final instruction to the basePrompt to ensure completion
       const todayDate = new Date().toISOString().split('T')[0];
-      const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic. Strictly follow the agent's style.\nToday's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.
+      const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic.
+Today's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.
 
 DATE LOGIC RULE:
 If a customer requests a booking for a date that is BEFORE today's date (${todayDate}), you MUST politely reject it. DO NOT call the availability tool for past dates. Tell them: "Alamak boss, tarikh tu dah lepas la. Boleh bagi tarikh lain yang akan datang tak? 😊"
-
-BOOKING WORKFLOW RULE:
-1. GATHER INFO FIRST: If a customer asks to rent a car, chat with them to find out what model they want and what date/time. Do not call 'get_car_availability' until you know the model and date.
-2. AVAILABILITY CHECK: If a customer asks if a specific car is available on a specific date, you MUST use the 'get_car_availability' tool. If they ask for a list of cars, use 'get_all_cars'.
-3. When a customer agrees to book a car, you MUST follow these exact steps in order:
-   a. Send the Order Summary using EXACTLY this format:
-      Vehicle: [Model]
-      Pickup Date: [Date]
-      Pickup Time: [Time]
-      Price: [Price/day]
-      Duration: [Number] days
-   b. In the SAME message, instruct the customer to make the payment and upload 3 items: IC, Driving License, and Payment Receipt. (Unless they are a Repeat Customer, then ONLY ask for the Payment Receipt). You MUST include the exact text "[SEND_QR]" so the system attaches the QR code.
-3. Wait for the customer to upload the documents. (Documents will appear in your prompt as [UPLOADED_IMAGE: url] or [UPLOADED_DOCUMENT: url]).
-
-DOCUMENT VALIDATION RULES:
-When the customer uploads images, you must act as a strict validator. Check EVERY uploaded image.
-- RECEIPT: You MUST extract the date and amount from the receipt image. Compare the receipt date to Today's date (${todayDate}). If the date on the receipt is NOT exactly ${todayDate}, or if the amount is NOT RM100, you MUST reject it. Reply: "Sorry boss, resit ni macam tak jelas/tak betul. Boleh tolong hantar gambar resit penuh yang nampak tarikh hari ni (${todayDate}) dan amount RM100 tak? 🙏"
-- IC: Look closely for the exact text "MyKad". If the text "MyKad" is not clearly visible, and they are NOT a repeat customer, reject it. Reply: "Sorry boss, gambar IC ni macam tak jelas la. Boleh tolong hantar gambar MyKad yang nampak jelas tak? 🙏"
-- LICENSE: Look for the exact text "Lesen Memandu" or "Driving License". If neither is visible, and they are NOT a repeat customer, reject it. Reply: "Boss, gambar lesen ni macam bukan lesen memandu la. Boleh tolong hantar gambar Lesen Memandu yang nampak jelas tak? Mekasih! 🚗"
-- PDF: If they upload a PDF ([UPLOADED_DOCUMENT: url]), reply: "Boss, sistem I tak boleh baca file PDF/Document la buat masa ni. Boleh tolong open PDF tu, buat screenshot, lepas tu hantar sebagai gambar (photo) biasa tak? Mekasih boss! 🚗"
-
-4. COMPLETING THE BOOKING:
-Once the customer has uploaded a valid Payment Receipt (and other requested documents, if required), you MUST immediately call the 'save_booking_lead' tool with the details from the summary. 
-Do NOT wait for the customer to say "done". If the required documents are valid, call the tool.
-Do NOT call 'request_human_approval' unless the customer explicitly demands to speak to a human.
-
-5. After the 'save_booking_lead' tool succeeds, reply to the customer confirming the booking is secured and that a human agent will verify your payment shortly. Reply in your assigned persona.
 
 DOMAIN & SAFETY RULES:
 - Car Rental Only: You MUST ONLY answer enquiries or questions related to Car Rentals. If asked about other unrelated topics, politely decline and steer the conversation back to car rentals.
