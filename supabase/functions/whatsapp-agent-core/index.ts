@@ -1142,9 +1142,14 @@ TOOL & AVAILABILITY RULES:
 * If the tool returns an error, use the stalling tactic: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]" ONLY if the tool fails or a network error occurs.
 
 BOOKING WORKFLOW RULE (CRITICAL):
-1. For booking, you MUST collect: Vehicle Model, Pickup Date/Time, Duration/Price, IC Image, License Image, and Payment Receipt Image.
-2. Only AFTER the customer has submitted the final Payment Receipt AND you have visually verified the receipt (ensuring it matches the price and looks valid), you MUST call the "save_booking_lead" tool.
-3. Call "save_booking_lead" to push the details to the Bookings dashboard and notify the human agent. Do NOT call it before the payment receipt is received.`;
+1. For booking, you MUST collect ALL of the following: Vehicle Model, Pickup Date/Time, Duration/Price, IC Image, Driving License Image, and Payment Receipt Image.
+2. STRICT DOCUMENT AUDIT: You MUST ensure you have received BOTH the IC and Driving License images (unless they are a verified repeat customer). If missing, ASK for them. Do NOT proceed to the receipt stage without them.
+3. STRICT RECEIPT AUDIT: When the customer submits a payment receipt, you MUST visually verify it:
+   - Does it look like a valid banking/QR transfer receipt?
+   - Does the amount EXACTLY match the agreed rental price?
+   If the photo is irrelevant, blurry, or the amount is wrong, you MUST instantly reject it and ask them to send the correct receipt. Do NOT call save_booking_lead yet.
+4. TRIGGERING THE TOOL: ONLY when ALL documents (IC + License) are received AND the Payment Receipt passes the strict audit, you MUST call the "save_booking_lead" tool.
+5. POST-BOOKING RESPONSE: Once the 'save_booking_lead' tool is successfully triggered (which sends an email to the admin), you MUST reply to the customer in your persona's tone saying exactly: "Thank you for the booking, we will send you the confirmation order shortly." (Translate to your persona's casual Malay style).`;
 
       const getCarAvailabilityDeclaration: FunctionDeclaration = {
         name: "get_car_availability",
@@ -1200,11 +1205,11 @@ BOOKING WORKFLOW RULE (CRITICAL):
             pickup_time: { type: Type.STRING, description: "The time of pickup." },
             price: { type: Type.STRING, description: "The price of the rental." },
             duration: { type: Type.STRING, description: "The duration of the rental." },
-            ic_url: { type: Type.STRING, description: "The URL of the IC image." },
-            license_url: { type: Type.STRING, description: "The URL of the License image." },
+            ic_url: { type: Type.STRING, description: "The URL of the IC image. MUST be present unless repeat customer." },
+            license_url: { type: Type.STRING, description: "The URL of the License image. MUST be present unless repeat customer." },
             receipt_url: { type: Type.STRING, description: "The URL of the Payment Receipt image." }
           },
-          required: ["vehicle_model", "pickup_date", "pickup_time", "price", "duration", "receipt_url"],
+          required: ["vehicle_model", "pickup_date", "pickup_time", "price", "duration", "ic_url", "license_url", "receipt_url"],
         },
       };
 
