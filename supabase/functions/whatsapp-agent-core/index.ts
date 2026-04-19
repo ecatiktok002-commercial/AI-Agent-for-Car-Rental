@@ -1122,10 +1122,8 @@ ${referenceSnippets ? `\nSTYLE REFERENCE (Mimic this tone/vocabulary):\n${refere
 
 TIMEZONE RULE (CRITICAL):
 You are operating in Malaysia Time (GMT+8). The current local date is ${todayDate} and the current local time is ${currentTimeMYT}. 
-However, the external car database tool strictly returns and evaluates time in UTC. 
-- When the customer gives you a time (e.g., 7 PM, 19:00), it is in GMT+8.
-- If the tool returns available times in UTC, you MUST mechanically add 8 hours to convert them to GMT+8 before telling the customer! (e.g., 04:00 UTC = 12:00 PM Malaysia, 11:00 UTC = 7:00 PM Malaysia). Be very careful with date roll-overs.
-- ALWAYS use YYYY-MM-DD format for date tool arguments.
+- When the customer gives you a time (e.g., 7 PM, 19:00), it is in GMT+8. Passes this LOCAL time directly into tools! The system will handle UTC backend conversions automatically.
+- If the tool returns available times, understand those are in UTC! So you MUST manually add +8 hours to any available slots returned by the tool before proposing them to the customer! (e.g. if tool returns "04:00" available, you tell customer "12:00 PM" available).
 
 DATE LOGIC RULE:
 If a customer requests a booking for a date that is BEFORE today's date (${todayDate}), you MUST politely reject it. DO NOT call the availability tool for past dates. Tell them: "Alamak boss, tarikh tu dah lepas la. Boleh bagi tarikh lain yang akan datang tak? 😊"
@@ -1154,7 +1152,7 @@ TOOL & AVAILABILITY RULES:
             },
             date: {
               type: Type.STRING,
-              description: "The date (and optionally time) to check availability for. If the customer does NOT specify a exact time, use strictly YYYY-MM-DD. If the customer DOES specify a time (e.g. 'sekarang', '7 PM', '19:00'), you MUST mentally subtract 8 hours to get UTC, and pass it in YYYY-MM-DD HH:mm:00 format.",
+              description: "The date (and optionally time) to check availability for. If the customer does NOT specify a exact time, use strictly YYYY-MM-DD. If the customer DOES specify a time (e.g. 'sekarang', '7 PM', '19:00'), you MUST pass the LOCAL MALAYSIA time in YYYY-MM-DD HH:mm:00 format directly. (e.g. 19:00:00 for 7 PM).",
             },
           },
           required: ["car_model", "date"],
@@ -1248,12 +1246,31 @@ TOOL & AVAILABILITY RULES:
           if (call.name === "get_car_availability") {
             toolCalled = true;
             const args = call.args as any;
+            
+            // System Timezone handling: Ensure the LLM's GMT+8 input is correctly formatted for UTC query if exact time is specified
+            let finalDateStr = args.date;
+            if (finalDateStr && finalDateStr.includes(' ')) {
+              try {
+                // Parse it as GMT+8 local time
+                const formattedIso = finalDateStr.replace(' ', 'T') + '+08:00';
+                const localDate = new Date(formattedIso);
+                if (!isNaN(localDate.getTime())) {
+                   // Formulate UTC date string YYYY-MM-DD HH:mm:00
+                   const utcStr = localDate.toISOString(); // e.g. 2026-04-19T11:00:00.000Z
+                   finalDateStr = utcStr.split('T')[0] + ' ' + utcStr.split('T')[1].substring(0, 8);
+                   console.log(`Timezone converted! LLM provided local: ${args.date} -> UTC for Database: ${finalDateStr}`);
+                }
+              } catch(e) {
+                console.log("Timezone parsing skipped, using raw args");
+              }
+            }
+
             try {
               if (extSupabase) {
                 const subscriberId = Deno.env.get("EXTERNAL_SUBSCRIBER_ID") || 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
                 const { data, error } = await extSupabase.rpc('check_car_availability', {
                   p_model: args.car_model,
-                  p_date: args.date,
+                  p_date: finalDateStr,
                   p_subscriber_id: subscriberId
                 });
 
