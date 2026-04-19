@@ -1113,9 +1113,19 @@ ${referenceSnippets ? `\nSTYLE REFERENCE (Mimic this tone/vocabulary):\n${refere
       }
 
       // Add a final instruction to the basePrompt to ensure completion
-      const todayDate = new Date().toISOString().split('T')[0];
+      const nowUtC = new Date();
+      const mytDateObj = new Date(nowUtC.getTime() + 8 * 3600 * 1000);
+      const todayDate = mytDateObj.toISOString().split('T')[0];
+      const currentTimeMYT = mytDateObj.toISOString().split('T')[1].substring(0, 5);
+      
       const finalBasePrompt = `${basePrompt}\n\nIMPORTANT: Be concise. Stay on topic.
-Today's date is ${todayDate}. When calling tools that require a date, ALWAYS use YYYY-MM-DD format.
+
+TIMEZONE RULE (CRITICAL):
+You are operating in Malaysia Time (GMT+8). The current local date is ${todayDate} and the current local time is ${currentTimeMYT}. 
+However, the external car database tool strictly returns and evaluates time in UTC. 
+- When the customer gives you a time (e.g., 7 PM, 19:00), it is in GMT+8.
+- If the tool returns available times in UTC, you MUST mechanically add 8 hours to convert them to GMT+8 before telling the customer! (e.g., 04:00 UTC = 12:00 PM Malaysia, 11:00 UTC = 7:00 PM Malaysia). Be very careful with date roll-overs.
+- ALWAYS use YYYY-MM-DD format for date tool arguments.
 
 DATE LOGIC RULE:
 If a customer requests a booking for a date that is BEFORE today's date (${todayDate}), you MUST politely reject it. DO NOT call the availability tool for past dates. Tell them: "Alamak boss, tarikh tu dah lepas la. Boleh bagi tarikh lain yang akan datang tak? 😊"
@@ -1127,7 +1137,7 @@ DOMAIN & SAFETY RULES:
 
 TOOL & AVAILABILITY RULES:
 * If get_car_availability returns available: true, you say: "Ada boss! [Model] masih available untuk tarikh tu. Nak I proceed booking ke? 😊"
-* If get_car_availability reveals the car is unavailable: DO NOT blindly propose a +/- 2 hours change. You MUST first check the tool's returned data to confirm if there is an actual availability within a +/- 2 hours window. Only propose a revised pickup time IF it is verified as available.
+* If get_car_availability reveals the car is unavailable: DO NOT blindly propose a +/- 2 hours change. You MUST first check the tool's returned data to confirm if there is an actual availability within a +/- 2 hours window. Only propose a revised pickup time IF it is verified as available. Convert any UTC times returned to GMT+8 (+8 hours) before proposing them!
 * You MUST ALSO use the get_car_availability tool to check OTHER vehicle models (e.g. Bezza, Saga, Axia) for the exact same date/time. You can call the tool multiple times to check different models. If another model is confirmed available, propose it!
 * Verified Example: "Alamak boss, [Model] pukul 10am dah penuh. Tapi pukul 12pm ada kosong, atau boss nak try model [Alternative Model] untuk pukul 10am?"
 * If the tool returns an error, use the stalling tactic: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT] (Tool failed: {extract the error message from the tool response here})" ONLY if the tool fails or a network error occurs.`;
@@ -1144,7 +1154,7 @@ TOOL & AVAILABILITY RULES:
             },
             date: {
               type: Type.STRING,
-              description: "The date to check availability for. MUST be strictly in YYYY-MM-DD format. If the user says 'tomorrow', 'esok', or '4/4', you must convert it to the correct YYYY-MM-DD date based on today's date.",
+              description: "The date (and optionally time) to check availability for. If the customer does NOT specify a exact time, use strictly YYYY-MM-DD. If the customer DOES specify a time (e.g. 'sekarang', '7 PM', '19:00'), you MUST mentally subtract 8 hours to get UTC, and pass it in YYYY-MM-DD HH:mm:00 format.",
             },
           },
           required: ["car_model", "date"],
