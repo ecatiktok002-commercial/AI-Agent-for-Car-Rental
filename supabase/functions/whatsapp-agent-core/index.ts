@@ -742,15 +742,20 @@ serve(async (req) => {
 
                 // Check if this is a returning repeat customer
                 let isRepeatCustomer = false;
+                let pastIcUrl = null;
+                let pastLicenseUrl = null;
                 const { data: pastBookings } = await supabase
                   .from("booking_leads")
-                  .select("id")
+                  .select("id, ic_url, license_url")
                   .eq("customer_phone", customer.phone_number)
                   .eq("status", "DONE")
+                  .order("created_at", { ascending: false })
                   .limit(1);
 
                 if (pastBookings && pastBookings.length > 0) {
                   isRepeatCustomer = true;
+                  pastIcUrl = pastBookings[0].ic_url;
+                  pastLicenseUrl = pastBookings[0].license_url;
                   personaInstructions += `\n\n[CRITICAL RETENTION RULE] This is a returning customer who previously completed a car rental with us! YOU MUST welcome them back warmly (e.g., "Welcome back boss! / Hai boss, kembali lagi!"). Because their documentation is already in our system, do NOT ask them to upload their IC or Driver's License again. Just ask them what car they want to rent this time and confirm the dates/times.`;
                 }
 
@@ -1299,8 +1304,8 @@ TOOL & AVAILABILITY RULES:
                 pickup_time: args.pickup_time,
                 price: args.price,
                 duration: args.duration,
-                ic_url: args.ic_url,
-                license_url: args.license_url,
+                ic_url: args.ic_url || pastIcUrl || 'Repeat Customer - On File',
+                license_url: args.license_url || pastLicenseUrl || 'Repeat Customer - On File',
                 receipt_url: args.receipt_url,
                 status: 'Pending'
               };
@@ -1495,8 +1500,8 @@ Conversation: ${JSON.stringify(contents)}`;
               pickup_time: details.pickup_time || "Auto-captured",
               price: details.price || "Auto-captured",
               duration: details.duration || "Auto-captured",
-              ic_url: details.ic_url,
-              license_url: details.license_url,
+              ic_url: details.ic_url || pastIcUrl || (isRepeatCustomer ? 'Repeat Customer - On File' : null),
+              license_url: details.license_url || pastLicenseUrl || (isRepeatCustomer ? 'Repeat Customer - On File' : null),
               receipt_url: details.receipt_url,
               status: 'Pending'
             }]);
