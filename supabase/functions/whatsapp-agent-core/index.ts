@@ -962,19 +962,15 @@ ${formattedFacts}`;
 
       // Helper function to automatically switch models on failure
       const callGeminiWithFallback = async (requestParams: any) => {
-        const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
-        for (let i = 0; i < models.length; i++) {
-          try {
-            return await ai.models.generateContent({
-              ...requestParams,
-              model: models[i]
-            });
-          } catch (error: any) {
-            console.warn(`⚠️ Model (${models[i]}) failed: ${error.message}.`);
-            if (i === models.length - 1) throw error;
-          }
+        try {
+          return await ai.models.generateContent({
+            ...requestParams,
+            model: "gemini-2.0-flash"
+          });
+        } catch (error: any) {
+          console.warn(`⚠️ Model gemini-2.0-flash failed: ${error.message}.`);
+          throw error;
         }
-        throw new Error("All models failed");
       };
 
       // Helper function to fetch image and convert to inlineData for Gemini
