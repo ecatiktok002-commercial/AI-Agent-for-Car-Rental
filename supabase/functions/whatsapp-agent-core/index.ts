@@ -1525,7 +1525,7 @@ Conversation: ${JSON.stringify(contents)}`;
       }
       
       console.error("Gemini Fetch Error:", error);
-      return `Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT] (Error: ${error.message})`;
+      return `Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT] (System Error: ${error.message})`;
     }
   }
   
