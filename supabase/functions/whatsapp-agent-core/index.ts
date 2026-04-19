@@ -741,7 +741,12 @@ serve(async (req) => {
               // --- DEBOUNCE LOGIC END ---
 
               // 4. AI Logic
-              if (freshTicket.status === "ai_handling" || freshTicket.status === "waiting_agent") {
+              if (freshTicket.status === "waiting_agent") {
+                console.log(`🛑 Ticket is waiting for human agent. Muting AI response.`);
+                return new Response('Ignored - Waiting for agent', { status: 200, headers: corsHeaders });
+              }
+
+              if (freshTicket.status === "ai_handling") {
                 let personaInstructions = null;
                 let agentName = "AI Assistant";
                 let referenceSnippets = null;
@@ -1129,7 +1134,7 @@ TOOL & AVAILABILITY RULES:
 * If get_car_availability reveals the car is unavailable: DO NOT blindly propose a +/- 2 hours change. You MUST first check the tool's returned data to confirm if there is an actual availability within a +/- 2 hours window. Only propose a revised pickup time IF it is verified as available.
 * You MUST ALSO use the get_car_availability tool to check OTHER vehicle models (e.g. Bezza, Saga, Axia) for the exact same date/time. You can call the tool multiple times to check different models. If another model is confirmed available, propose it!
 * Verified Example: "Alamak boss, [Model] pukul 10am dah penuh. Tapi pukul 12pm ada kosong, atau boss nak try model [Alternative Model] untuk pukul 10am?"
-* Use the stalling tactic ("Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]") ONLY if the tool fails or a network error occurs.`;
+* If the tool returns an error, use the stalling tactic: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT] (Tool failed: {extract the error message from the tool response here})" ONLY if the tool fails or a network error occurs.`;
 
       const getCarAvailabilityDeclaration: FunctionDeclaration = {
         name: "get_car_availability",
