@@ -1123,7 +1123,7 @@ ${referenceSnippets ? `\nSTYLE REFERENCE (Mimic this tone/vocabulary):\n${refere
 TIMEZONE RULE (CRITICAL):
 You are operating in Malaysia Time (GMT+8). The current local date is ${todayDate} and the current local time is ${currentTimeMYT}. 
 - For get_car_availability: Pass ONLY the overarching Date (YYYY-MM-DD).
-- For find_nearest_available_time: Pass the LOCAL MALAYSIA TIME directly as YYYY-MM-DD HH:mm:00. The times returned by this tool are ALREADY in Malaysia Time (GMT+8). You MUST propose those EXACT returned times to the customer (do NOT add or subtract any hours).
+- For find_nearest_available_time: Pass the LOCAL MALAYSIA TIME directly exactly as YYYY-MM-DDTHH:mm:00 (with the T). The times returned by this tool are ALREADY in Malaysia Time (GMT+8). You MUST propose those EXACT returned times to the customer (do NOT add or subtract any hours).
 
 DATE LOGIC RULE:
 If a customer requests a booking for a date that is BEFORE today's date (${todayDate}), you MUST politely reject it. DO NOT call the availability tool for past dates. Tell them: "Alamak boss, tarikh tu dah lepas la. Boleh bagi tarikh lain yang akan datang tak? 😊"
@@ -1177,7 +1177,7 @@ BOOKING WORKFLOW RULE (CRITICAL):
             },
             target_datetime: {
               type: Type.STRING,
-              description: "The requested local Malaysia datetime to search around. MUST be in YYYY-MM-DD HH:mm:00 format.",
+              description: "The requested local Malaysia datetime. MUST be strictly formatted as YYYY-MM-DDTHH:mm:00 (with the T).",
             },
           },
           required: ["car_model", "target_datetime"],
