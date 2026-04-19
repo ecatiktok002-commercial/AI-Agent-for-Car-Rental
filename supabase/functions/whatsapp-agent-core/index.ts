@@ -1265,11 +1265,17 @@ TOOL & AVAILABILITY RULES:
               }
             }
 
+            // Ensure exact model formatting to match database (System returns Proton Saga not Saga)
+            let formattedModel = args.car_model;
+            if (formattedModel.toLowerCase().includes('saga')) formattedModel = 'Proton Saga';
+            if (formattedModel.toLowerCase().includes('bezza')) formattedModel = 'Perodua Bezza';
+            if (formattedModel.toLowerCase().includes('axia')) formattedModel = 'Perodua Axia';
+
             try {
               if (extSupabase) {
                 const subscriberId = Deno.env.get("EXTERNAL_SUBSCRIBER_ID") || 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
                 const { data, error } = await extSupabase.rpc('check_car_availability', {
-                  p_model: args.car_model,
+                  p_model: formattedModel,
                   p_date: finalDateStr,
                   p_subscriber_id: subscriberId
                 });

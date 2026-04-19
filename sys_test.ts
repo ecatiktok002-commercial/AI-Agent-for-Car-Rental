@@ -1,4 +1,4 @@
-import { createClient } from '@supabase/supabase-js';
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.45.6';
 
 const EXT_URL = "https://czurhanyrjgeicnbrnev.supabase.co";
 const EXT_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImN6dXJoYW55cmpnZWljbmJybmV2Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE4NTExMDEsImV4cCI6MjA4NzQyNzEwMX0.LV4hsQEazpbv8AcLDrEASg8s3uGKmvMJ0FrvMOX6AWQ";
@@ -25,7 +25,7 @@ async function run() {
   
   // also what cars does get_all_cars return?
   const { data } = await extSupabase.rpc('get_all_car_models', { p_subscriber_id: subscriberId });
-  console.log("\nAll cars:", data);
+  console.log("All cars:", data);
 }
 
 run();
