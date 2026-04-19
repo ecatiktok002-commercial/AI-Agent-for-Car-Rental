@@ -1207,7 +1207,6 @@ TOOL & AVAILABILITY RULES:
 
       const activeTools = [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration];
       
-      const agentName = freshTicket.assigned_agent_id ? (await supabase.from("agents").select("name").eq("id", freshTicket.assigned_agent_id).single()).data?.name : null;
       if (ENABLE_SELF_LEARNING && agentName && agentName.toLowerCase() === "laila") {
         activeTools.push(suggestKnowledgeTool);
       }
