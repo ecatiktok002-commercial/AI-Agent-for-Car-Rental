@@ -1122,8 +1122,8 @@ ${referenceSnippets ? `\nSTYLE REFERENCE (Mimic this tone/vocabulary):\n${refere
 
 TIMEZONE RULE (CRITICAL):
 You are operating in Malaysia Time (GMT+8). The current local date is ${todayDate} and the current local time is ${currentTimeMYT}. 
-- When the customer gives you a time (e.g., 7 PM, 19:00), it is in GMT+8. Passes this LOCAL time directly into tools! The system will handle UTC backend conversions automatically.
-- If the tool returns available times, understand those are in UTC! So you MUST manually add +8 hours to any available slots returned by the tool before proposing them to the customer! (e.g. if tool returns "04:00" available, you tell customer "12:00 PM" available).
+- NOTE: The external car database tool only supports checking availability by overarching Date (YYYY-MM-DD), NOT by specific hours.
+- Therefore, if a customer asks for a specific time, you must only pass the YYYY-MM-DD date to the system tool.
 
 DATE LOGIC RULE:
 If a customer requests a booking for a date that is BEFORE today's date (${todayDate}), you MUST politely reject it. DO NOT call the availability tool for past dates. Tell them: "Alamak boss, tarikh tu dah lepas la. Boleh bagi tarikh lain yang akan datang tak? 😊"
@@ -1135,9 +1135,9 @@ DOMAIN & SAFETY RULES:
 
 TOOL & AVAILABILITY RULES:
 * If get_car_availability returns available: true, you say: "Ada boss! [Model] masih available untuk tarikh tu. Nak I proceed booking ke? 😊"
-* If get_car_availability reveals the car is unavailable: DO NOT blindly propose a +/- 2 hours change. You MUST first check the tool's returned data to confirm if there is an actual availability within a +/- 2 hours window. Only propose a revised pickup time IF it is verified as available. Convert any UTC times returned to GMT+8 (+8 hours) before proposing them!
-* You MUST ALSO use the get_car_availability tool to check OTHER vehicle models (e.g. Bezza, Saga, Axia) for the exact same date/time. You can call the tool multiple times to check different models. If another model is confirmed available, propose it!
-* Verified Example: "Alamak boss, [Model] pukul 10am dah penuh. Tapi pukul 12pm ada kosong, atau boss nak try model [Alternative Model] untuk pukul 10am?"
+* If get_car_availability reveals the car is unavailable: Tell the customer frankly that the car is fully booked for that day. 
+* You MUST ALSO use the get_car_availability tool to check OTHER vehicle models (e.g. Bezza, Saga, Axia) for the exact same date. You can call the tool multiple times to check different models. If another model is confirmed available, propose it!
+* Verified Example: "Alamak boss, [Model] untuk tarikh tu dah penuh. Boleh boss consider model [Alternative Model] tak? Model ni masih kosong!"
 * If the tool returns an error, use the stalling tactic: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT] (Tool failed: {extract the error message from the tool response here})" ONLY if the tool fails or a network error occurs.`;
 
       const getCarAvailabilityDeclaration: FunctionDeclaration = {
@@ -1152,7 +1152,7 @@ TOOL & AVAILABILITY RULES:
             },
             date: {
               type: Type.STRING,
-              description: "The date (and optionally time) to check availability for. If the customer does NOT specify a exact time, use strictly YYYY-MM-DD. If the customer DOES specify a time (e.g. 'sekarang', '7 PM', '19:00'), you MUST pass the LOCAL MALAYSIA time in YYYY-MM-DD HH:mm:00 format directly. (e.g. 19:00:00 for 7 PM).",
+              description: "The date to check availability for. MUST be strictly in YYYY-MM-DD format (no time). If the user asks for a specific time, just pass the overarching date YYYY-MM-DD based on today's date.",
             },
           },
           required: ["car_model", "date"],
@@ -1246,24 +1246,6 @@ TOOL & AVAILABILITY RULES:
           if (call.name === "get_car_availability") {
             toolCalled = true;
             const args = call.args as any;
-            
-            // System Timezone handling: Ensure the LLM's GMT+8 input is correctly formatted for UTC query if exact time is specified
-            let finalDateStr = args.date;
-            if (finalDateStr && finalDateStr.includes(' ')) {
-              try {
-                // Parse it as GMT+8 local time
-                const formattedIso = finalDateStr.replace(' ', 'T') + '+08:00';
-                const localDate = new Date(formattedIso);
-                if (!isNaN(localDate.getTime())) {
-                   // Formulate UTC date string YYYY-MM-DD HH:mm:00
-                   const utcStr = localDate.toISOString(); // e.g. 2026-04-19T11:00:00.000Z
-                   finalDateStr = utcStr.split('T')[0] + ' ' + utcStr.split('T')[1].substring(0, 8);
-                   console.log(`Timezone converted! LLM provided local: ${args.date} -> UTC for Database: ${finalDateStr}`);
-                }
-              } catch(e) {
-                console.log("Timezone parsing skipped, using raw args");
-              }
-            }
 
             // Ensure exact model formatting to match database (System returns Proton Saga not Saga)
             let formattedModel = args.car_model;
@@ -1276,7 +1258,7 @@ TOOL & AVAILABILITY RULES:
                 const subscriberId = Deno.env.get("EXTERNAL_SUBSCRIBER_ID") || 'be5c97d4-4a83-49dd-8f5d-5616c54c72fd';
                 const { data, error } = await extSupabase.rpc('check_car_availability', {
                   p_model: formattedModel,
-                  p_date: finalDateStr,
+                  p_date: args.date,
                   p_subscriber_id: subscriberId
                 });
 
