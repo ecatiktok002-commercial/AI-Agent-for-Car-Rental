@@ -1139,7 +1139,12 @@ TOOL & AVAILABILITY RULES:
 * If find_nearest_available_time RETURNS the EXACT time requested by the customer: It means the car IS available! Say: "Berita baik boss! Lepas double check, pukul [Time] tu memang ada kosong untuk [Model]. Nak proceed booking terus?"
 * If find_nearest_available_time returns DIFFERENT times: Say: "Alamak boss, pukul [Requested Time] tu dah penuh. Tapi sistem tunjuk ada kosong pukul [New Time]. Boss nak consider waktu tu tak?"
 * You MUST ALSO use the get_car_availability tool to check OTHER vehicle models (e.g. Bezza, Saga, Axia) for the exact same date. You can call the tool multiple times to check different models. 
-* If the tool returns an error, use the stalling tactic: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]" ONLY if the tool fails or a network error occurs.`;
+* If the tool returns an error, use the stalling tactic: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]" ONLY if the tool fails or a network error occurs.
+
+BOOKING WORKFLOW RULE (CRITICAL):
+1. For booking, you MUST collect: Vehicle Model, Pickup Date/Time, Duration/Price, IC Image, License Image, and Payment Receipt Image.
+2. Only AFTER the customer has submitted the final Payment Receipt AND you have visually verified the receipt (ensuring it matches the price and looks valid), you MUST call the "save_booking_lead" tool.
+3. Call "save_booking_lead" to push the details to the Bookings dashboard and notify the human agent. Do NOT call it before the payment receipt is received.`;
 
       const getCarAvailabilityDeclaration: FunctionDeclaration = {
         name: "get_car_availability",
@@ -1186,7 +1191,7 @@ TOOL & AVAILABILITY RULES:
 
       const saveBookingLeadDeclaration: FunctionDeclaration = {
         name: "save_booking_lead",
-        description: "Save the complete booking details after documents are received.",
+        description: "Save the complete booking details ONLY AFTER the customer has submitted the final Payment Receipt AND you have verified it.",
         parameters: {
           type: Type.OBJECT,
           properties: {
@@ -1199,19 +1204,7 @@ TOOL & AVAILABILITY RULES:
             license_url: { type: Type.STRING, description: "The URL of the License image." },
             receipt_url: { type: Type.STRING, description: "The URL of the Payment Receipt image." }
           },
-          required: ["vehicle_model", "pickup_date", "pickup_time", "price", "duration"],
-        },
-      };
-
-      const requestHumanApprovalDeclaration: FunctionDeclaration = {
-        name: "request_human_approval",
-        description: "Request a human agent to verify a payment receipt image. ONLY call this tool if you have confirmed the image is a payment receipt containing banking transaction details, payment confirmation, or a QR pay success screen with a visible date.",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {
-            receipt_url: { type: Type.STRING, description: "The URL of the payment receipt image to be verified." }
-          },
-          required: ["receipt_url"],
+          required: ["vehicle_model", "pickup_date", "pickup_time", "price", "duration", "receipt_url"],
         },
       };
 
@@ -1229,7 +1222,7 @@ TOOL & AVAILABILITY RULES:
         }
       };
 
-      const activeTools = [getCarAvailabilityDeclaration, findNearestAvailableTimeDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration];
+      const activeTools = [getCarAvailabilityDeclaration, findNearestAvailableTimeDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration];
       
       if (ENABLE_SELF_LEARNING && agentName && agentName.toLowerCase() === "laila") {
         activeTools.push(suggestKnowledgeTool);
@@ -1423,17 +1416,6 @@ TOOL & AVAILABILITY RULES:
             } catch (err: any) {
               console.error("❌ Booking Save Error:", err.message);
               toolResult = { error: err.message };
-            }
-          } else if (call.name === "request_human_approval") {
-            toolCalled = true;
-            const args = call.args as any;
-            try {
-              console.log("🚀 Requesting human approval for receipt:", args.receipt_url);
-              await supabase.from('tickets').update({ tag: 'Receipt Verification', status: 'waiting_agent' }).eq('id', ticketId);
-              toolResult = { success: true, message: "Human agent notified for receipt verification." };
-            } catch (e: any) {
-              console.error("❌ Approval Request Error:", e.message);
-              toolResult = { error: e.message };
             }
           } else if (call.name === "suggest_knowledge_update") {
             toolCalled = true;
