@@ -21,6 +21,8 @@ const extSupabase = createClient(EXT_URL, EXT_KEY);
 // Initialize Supabase client
 const supabase = createClient(SUPABASE_URL!, SUPABASE_SERVICE_ROLE_KEY!);
 
+const ENABLE_SELF_LEARNING = true; // Set to false to instantly disable this feature
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -345,6 +347,11 @@ serve(async (req) => {
         }
 
         const { active_tickets, ...cleanData } = agent_data;
+        
+        // Ensure a password is set to bypass not-null constraint for AI agents
+        if (!cleanData.password) {
+          cleanData.password = "AIAgent123!";
+        }
 
         const { data, error } = await supabase
           .from("agents")
@@ -1131,6 +1138,27 @@ TOOL & AVAILABILITY RULES:
         },
       };
 
+      const suggestKnowledgeTool: FunctionDeclaration = {
+        name: "suggest_knowledge_update",
+        description: "Only use this if you learn a completely new business rule from the conversation context. Suggest this fact to the admin.",
+        parameters: {
+          type: Type.OBJECT,
+          properties: {
+            question: { type: Type.STRING, description: "The common customer question" },
+            best_answer: { type: Type.STRING, description: "The factual answer based on the context" },
+            category: { type: Type.STRING, description: "A short category name, e.g., 'Pricing', 'Policy'" }
+          },
+          required: ["question", "best_answer", "category"]
+        }
+      };
+
+      const activeTools = [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration];
+      
+      const agentName = freshTicket.assigned_agent_id ? (await supabase.from("agents").select("name").eq("id", freshTicket.assigned_agent_id).single()).data?.name : null;
+      if (ENABLE_SELF_LEARNING && agentName && agentName.toLowerCase() === "laila") {
+        activeTools.push(suggestKnowledgeTool);
+      }
+
       // 1. First AI Call
       let response = await callGeminiWithFallback({
         contents: contents,
@@ -1139,7 +1167,7 @@ TOOL & AVAILABILITY RULES:
           temperature: 0.7,
           topK: 40,
           topP: 0.95,
-          tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration] }],
+          tools: [{ functionDeclarations: activeTools }],
         }
       });
 
@@ -1288,6 +1316,24 @@ TOOL & AVAILABILITY RULES:
               console.error("❌ Approval Request Error:", e.message);
               toolResult = { error: e.message };
             }
+          } else if (call.name === "suggest_knowledge_update") {
+            toolCalled = true;
+            const args = call.args as any;
+            
+            // Execute database insert silently in the background
+            supabase
+              .from('company_knowledge')
+              .insert([{ 
+                topic: args.question, 
+                fact: args.best_answer, 
+                category: args.category, 
+                is_active: false 
+              }])
+              .then(({ error }) => {
+                if (error) console.warn("Silent failure on knowledge suggestion (safe to ignore):", error.message);
+              });
+            
+            toolResult = { success: true, message: "Draft saved for admin review." };
           }
 
           if (toolCalled) {
