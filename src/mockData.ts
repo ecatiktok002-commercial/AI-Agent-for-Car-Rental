@@ -103,7 +103,7 @@ export const MOCK_TICKETS: Ticket[] = [
     id: 't3',
     customer_id: 'c3',
     customer: MOCK_CUSTOMERS[2],
-    status: 'waiting_agent',
+    status: 'waiting_assignment',
     assigned_agent_id: null,
     handled_by: 'agent',
     tag: 'Sales',

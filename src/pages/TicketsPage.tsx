@@ -658,7 +658,7 @@ export default function TicketsPage() {
             <div className="p-8 text-center text-slate-400 text-sm">No open tickets</div>
           ) : (
             tickets.map((ticket) => {
-              const needsAction = ticket.last_message?.includes('[NEEDS_AGENT]') && ticket.status === 'waiting_agent';
+              const needsAction = ticket.last_message?.includes('[NEEDS_AGENT]') && ticket.status === 'waiting_assignment';
               const displayLastMessage = (ticket.last_message || 'No messages yet').replace(/\[NEEDS_AGENT\]/g, '').trim();
 
               return (
@@ -670,7 +670,7 @@ export default function TicketsPage() {
                     selectedTicketId === ticket.id 
                       ? ticket.status === 'ai_handling'
                         ? "bg-gradient-to-br from-blue-50 to-purple-50 shadow-sm ring-1 ring-blue-200 z-10"
-                        : ticket.status === 'assigned' || ticket.status === 'waiting_agent'
+                        : ticket.status === 'assigned' || ticket.status === 'waiting_assignment'
                           ? "bg-gradient-to-br from-emerald-50 to-blue-50 shadow-sm ring-1 ring-emerald-200 z-10"
                           : "bg-white shadow-sm ring-1 ring-slate-200 z-10"
                       : "",
@@ -700,12 +700,12 @@ export default function TicketsPage() {
                   <div className="flex gap-2 mt-1">
                     <Badge variant={
                       ticket.status === 'ai_handling' ? 'ai' : 
-                      ticket.status === 'waiting_agent' ? 'warning' : 'success'
+                      ticket.status === 'waiting_assignment' ? 'warning' : 'success'
                     }>
                       {ticket.status === 'ai_handling' 
                         ? `AI ${ticket.assigned_agent?.name?.split(' ')[0] || 'Agent'}` 
-                        : ticket.status === 'waiting_agent'
-                          ? `Waiting for ${ticket.assigned_agent?.name?.split(' ')[0] || 'Agent'}`
+                        : ticket.status === 'waiting_assignment'
+                          ? `Needs Assignment`
                           : `Agent ${ticket.assigned_agent?.name?.split(' ')[0] || 'Agent'}`}
                     </Badge>
                     {ticket.tag && (
@@ -738,11 +738,11 @@ export default function TicketsPage() {
                 <div className="flex items-center gap-2">
                   <span className="text-xs text-slate-500">{selectedTicket.customer?.phone_number}</span>
                   <span className="w-1 h-1 bg-slate-300 rounded-full" />
-                  <Badge variant={selectedTicket.status === 'ai_handling' ? 'ai' : selectedTicket.status === 'waiting_agent' ? 'warning' : 'success'}>
+                  <Badge variant={selectedTicket.status === 'ai_handling' ? 'ai' : selectedTicket.status === 'waiting_assignment' ? 'warning' : 'success'}>
                     {selectedTicket.status === 'ai_handling' 
                       ? `Chat active: AI ${selectedTicket.assigned_agent?.name?.split(' ')[0] || 'Agent'}` 
-                      : selectedTicket.status === 'waiting_agent'
-                        ? `Waiting for ${selectedTicket.assigned_agent?.name?.split(' ')[0] || 'Agent'}`
+                      : selectedTicket.status === 'waiting_assignment'
+                        ? `Needs Manual Assignment`
                         : `Chat active: Agent ${selectedTicket.assigned_agent?.name?.split(' ')[0] || 'Agent'}`}
                   </Badge>
                 </div>
@@ -772,7 +772,7 @@ export default function TicketsPage() {
                   />
                 </button>
               </div>
-              {(selectedTicket.status === 'ai_handling' || selectedTicket.status === 'waiting_agent') && (
+              {(selectedTicket.status === 'ai_handling' || selectedTicket.status === 'waiting_assignment') && (
                 <button 
                   onClick={handleTakeOver}
                   disabled={isTakingOver}
@@ -1013,19 +1013,19 @@ export default function TicketsPage() {
                 placeholder={
                   (selectedTicket.handled_by || 'ai') === 'ai' || selectedTicket.status === 'ai_handling'
                     ? "AI is handling this... Click 'Take Over' to reply." 
-                    : selectedTicket.status === 'waiting_agent'
-                      ? "Assigned to you. Click 'Take Over' to reply."
+                    : selectedTicket.status === 'waiting_assignment'
+                      ? "Needs Assignment. Admin must assign manually or take over."
                       : "Type your reply..."
                 }
                 disabled={
                   isSending ||
                   (selectedTicket.handled_by || 'ai') === 'ai' || 
                   selectedTicket.status === 'ai_handling' ||
-                  (selectedTicket.status === 'waiting_agent' && !isAdmin)
+                  (selectedTicket.status === 'waiting_assignment' && !isAdmin)
                 }
                 className={cn(
                   "w-full bg-transparent px-4 py-4 pr-32 text-sm focus:outline-none resize-none",
-                  (isSending || (selectedTicket.handled_by || 'ai') === 'ai' || selectedTicket.status === 'ai_handling' || (selectedTicket.status === 'waiting_agent' && !isAdmin)) && "opacity-50 cursor-not-allowed"
+                  (isSending || (selectedTicket.handled_by || 'ai') === 'ai' || selectedTicket.status === 'ai_handling' || (selectedTicket.status === 'waiting_assignment' && !isAdmin)) && "opacity-50 cursor-not-allowed"
                 )}
               />
               <div className="absolute right-2 bottom-2 flex items-center gap-1">
@@ -1043,7 +1043,7 @@ export default function TicketsPage() {
                     !messageText.trim() || 
                     (selectedTicket.handled_by || 'ai') === 'ai' || 
                     selectedTicket.status === 'ai_handling' ||
-                    (selectedTicket.status === 'waiting_agent' && !isAdmin)
+                    (selectedTicket.status === 'waiting_assignment' && !isAdmin)
                   }
                 >
                   {isSending ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}

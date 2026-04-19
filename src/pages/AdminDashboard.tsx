@@ -240,11 +240,11 @@ export default function AdminDashboard() {
                     <td className="px-6 py-4">
                       <Badge variant={
                         ticket.status === 'ai_handling' ? 'ai' : 
-                        ticket.status === 'waiting_agent' ? 'warning' : 'success'
+                        ticket.status === 'waiting_assignment' ? 'warning' : 'success'
                       }>
                         {ticket.status === 'ai_handling' 
                           ? `AI ${ticket.assigned_agent?.name?.split(' ')[0] || 'Agent'}` 
-                          : ticket.status === 'waiting_agent'
+                          : ticket.status === 'waiting_assignment'
                             ? `Waiting for ${ticket.assigned_agent?.name?.split(' ')[0] || 'Agent'}`
                             : `Agent ${ticket.assigned_agent?.name?.split(' ')[0] || 'Agent'}`}
                       </Badge>

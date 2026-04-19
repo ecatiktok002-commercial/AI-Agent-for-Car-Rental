@@ -1,6 +1,6 @@
 export type Role = 'admin' | 'agent';
 export type AgentStatus = 'online' | 'offline';
-export type TicketStatus = 'ai_handling' | 'waiting_assignment' | 'waiting_agent' | 'assigned';
+export type TicketStatus = 'ai_handling' | 'waiting_assignment' | 'waiting_assignment' | 'assigned';
 export type SenderType = 'customer' | 'agent' | 'ai' | 'system';
 export type ToneStyle = 'professional' | 'friendly' | 'energetic' | 'concise';
 export type EmojiLevel = 'none' | 'low' | 'medium' | 'high';

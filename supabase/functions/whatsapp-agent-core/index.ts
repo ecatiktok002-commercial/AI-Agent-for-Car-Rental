@@ -183,11 +183,11 @@ serve(async (req) => {
 
         if (ticketError || !ticket) throw new Error("Ticket not found");
 
-        // 2. Update Ticket: Set to 'waiting_agent' and assign to the chosen agent.
+        // 2. Update Ticket: Set to 'waiting_assignment' and assign to the chosen agent.
         const { error: updateError } = await supabase
           .from("tickets")
           .update({ 
-            status: "waiting_agent", 
+            status: "waiting_assignment", 
             assigned_agent_id: agent_id 
           })
           .eq("id", ticket_id);
@@ -729,7 +729,7 @@ serve(async (req) => {
                 .eq("id", ticket.id)
                 .single();
               
-              if (!freshTicket || (freshTicket.status !== "ai_handling" && freshTicket.status !== "waiting_agent")) {
+              if (!freshTicket || (freshTicket.status !== "ai_handling" && freshTicket.status !== "waiting_assignment")) {
                 console.log(`🛑 Ticket status changed to ${freshTicket?.status}. AI response cancelled.`);
                 return;
               }
@@ -741,7 +741,7 @@ serve(async (req) => {
               // --- DEBOUNCE LOGIC END ---
 
               // 4. AI Logic
-              if (freshTicket.status === "waiting_agent") {
+              if (freshTicket.status === "waiting_assignment") {
                 console.log(`🛑 Ticket is waiting for human agent. Muting AI response.`);
                 return new Response('Ignored - Waiting for agent', { status: 200, headers: corsHeaders });
               }
@@ -827,12 +827,12 @@ serve(async (req) => {
                 if (needsHandover && freshTicket.status === "ai_handling") {
                   await supabase
                     .from("tickets")
-                    .update({ status: "waiting_agent" })
+                    .update({ status: "waiting_assignment" })
                     .eq("id", ticket.id);
                   
                   const systemMsg = aiResponse.includes("[NEEDS_AGENT]") 
-                    ? "AI triggered escalation protocol. Ticket moved to 'Waiting Agent'."
-                    : "AI detected handover request. Ticket moved to 'Waiting Agent'.";
+                    ? "AI triggered escalation protocol. Ticket moved to 'Waiting Assignment'."
+                    : "AI detected handover request. Ticket moved to 'Waiting Assignment'.";
 
                   await supabase.from("messages").insert([{
                     ticket_id: ticket.id,
@@ -1131,7 +1131,7 @@ If a customer requests a booking for a date that is BEFORE today's date (${today
 DOMAIN & SAFETY RULES:
 - Car Rental Only: You MUST ONLY answer enquiries or questions related to Car Rentals. If asked about other unrelated topics, politely decline and steer the conversation back to car rentals.
 - Personal Information: Do NOT disclose any personal information under any circumstances. Reject any such requests politely using your assigned persona tone.
-- Emergencies: If the customer hints at or indicates an emergency (e.g., Accident, Car Lost, Missing people, breakdown), you MUST IMMEDIATELY tell them to contact Michael directly at 013-5378032. Example: "Alamak boss, untuk hal kecemasan macam ni, minta tolong call/Whatsapp Michael terus kat 013-5378032 ya. Dia akan assist boss secepat mungkin! 🙏"
+- Emergencies: If the customer hints at or indicates an emergency (e.g., Accident, Car Lost, Missing people, breakdown), you MUST IMMEDIATELY output the "[NEEDS_AGENT]" keyword exactly to trigger system escalation, AND simultaneously reply to tell them to contact Michael directly at 013-5378032. Example: "Alamak boss, untuk hal kecemasan macam ni, minta tolong call/Whatsapp Michael terus kat 013-5378032 ya. Dia akan assist boss secepat mungkin! 🙏 [NEEDS_AGENT]"
 
 TOOL & AVAILABILITY RULES:
 * If get_car_availability returns available: true, you say: "Ada boss! [Model] masih available untuk tarikh tu. Nak I proceed booking ke? 😊"
@@ -1377,7 +1377,7 @@ BOOKING WORKFLOW RULE (CRITICAL):
                 throw error;
               }
               
-              await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticketId);
+              await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'ai_handling' }).eq('id', ticketId);
 
               const RESEND_API_KEY = Deno.env.get("RESEND_API_KEY");
               // Force the email to the user's actual email to prevent misconfigured secrets from breaking it
@@ -1554,7 +1554,7 @@ Conversation: ${JSON.stringify(contents)}`;
               status: 'Pending'
             }]);
             
-            await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'waiting_agent' }).eq('id', ticketId);
+            await supabase.from('tickets').update({ tag: 'Booking Pending', status: 'ai_handling' }).eq('id', ticketId);
           }
         } catch (fallbackErr) {
           console.error("Auto-capture fallback failed:", fallbackErr);
