@@ -1022,10 +1022,12 @@ ${greetingRule}
   CRITICAL RULE 2: If a customer asks "kereta apa yang ada ya?" or "what cars do you have?", you MUST use the get_all_cars tool to get the list of cars. Do NOT guess the cars.
 
   Logic Flow:
+  - DO NOT rush to call the \`get_car_availability\` tool. If the customer just says "hi", "kereta sewa", or "saya nak sewa kereta", chat with them naturally first. Elicit which car model and what date/time they are looking for.
+  - ONLY use the \`get_car_availability\` tool when the customer has clearly requested a specific car model (or category you can map to a model) AND you have the intended pickup date.
   If get_car_availability returns available: true, you say: "Ada boss! Axia masih available untuk tarikh tu. Nak I proceed booking ke? 😊"
   If get_car_availability returns available: false, you say: "Alamak boss, Axia dah kena tapau (booked) la untuk tarikh tu. Tapi jap, I check Bezza atau Saga untuk boss nak?" (Then check the tool again for alternatives).
   If get_all_cars returns a list of cars, list them nicely to the customer.
-  If the tool fails, say: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya."`;
+  If the tool completely fails, output: "Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]"`;
 
       let basePrompt = `${knowledgeBaseBlock}
 ${conversationFlowRule}
@@ -1124,8 +1126,9 @@ DATE LOGIC RULE:
 If a customer requests a booking for a date that is BEFORE today's date (${todayDate}), you MUST politely reject it. DO NOT call the availability tool for past dates. Tell them: "Alamak boss, tarikh tu dah lepas la. Boleh bagi tarikh lain yang akan datang tak? 😊"
 
 BOOKING WORKFLOW RULE:
-1. AVAILABILITY CHECK: If a customer asks if a car is available ("Ada kosong tak?", "Available?", etc.) or asks for a list of cars, you MUST use the 'get_car_availability' or 'get_all_cars' tools.
-2. When a customer agrees to book a car, you MUST follow these exact steps in order:
+1. GATHER INFO FIRST: If a customer asks to rent a car, chat with them to find out what model they want and what date/time. Do not call 'get_car_availability' until you know the model and date.
+2. AVAILABILITY CHECK: If a customer asks if a specific car is available on a specific date, you MUST use the 'get_car_availability' tool. If they ask for a list of cars, use 'get_all_cars'.
+3. When a customer agrees to book a car, you MUST follow these exact steps in order:
    a. Send the Order Summary using EXACTLY this format:
       Vehicle: [Model]
       Pickup Date: [Date]
@@ -1159,7 +1162,7 @@ TOOL & AVAILABILITY RULES:
 * If get_car_availability reveals the car is unavailable: DO NOT blindly propose a +/- 2 hours change. You MUST first check the tool's returned data to confirm if there is an actual availability within a +/- 2 hours window. Only propose a revised pickup time IF it is verified as available.
 * You MUST ALSO use the get_car_availability tool to check OTHER vehicle models (e.g. Bezza, Saga, Axia) for the exact same date/time. You can call the tool multiple times to check different models. If another model is confirmed available, propose it!
 * Verified Example: "Alamak boss, [Model] pukul 10am dah penuh. Tapi pukul 12pm ada kosong, atau boss nak try model [Alternative Model] untuk pukul 10am?"
-* Use the stalling tactic ("Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya.") ONLY if the tool fails or a network error occurs.`;
+* Use the stalling tactic ("Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]") ONLY if the tool fails or a network error occurs.`;
 
       const getCarAvailabilityDeclaration: FunctionDeclaration = {
         name: "get_car_availability",
@@ -1182,11 +1185,7 @@ TOOL & AVAILABILITY RULES:
 
       const getAllCarsDeclaration: FunctionDeclaration = {
         name: "get_all_cars",
-        description: "Get a list of all car models available for rent in the company fleet.",
-        parameters: {
-          type: Type.OBJECT,
-          properties: {},
-        }
+        description: "Get a list of all car models available for rent in the company fleet."
       };
 
       const saveBookingLeadDeclaration: FunctionDeclaration = {
@@ -1256,6 +1255,10 @@ TOOL & AVAILABILITY RULES:
       let loopCount = 0;
       while (response.candidates?.[0]?.content?.parts?.some(p => p.functionCall) && loopCount < 5) {
         loopCount++;
+        
+        // Essential: Append the model's function call message to history before appending the response!
+        contents.push(response.candidates[0].content);
+        
         const functionResponseParts = [];
         let anyToolCalled = false;
 
@@ -1423,8 +1426,7 @@ TOOL & AVAILABILITY RULES:
             functionResponseParts.push({
               functionResponse: {
                 name: call.name,
-                response: toolResult,
-                id: call.id
+                response: toolResult
               }
             });
           }
@@ -1551,11 +1553,11 @@ Conversation: ${JSON.stringify(contents)}`;
       }
       
       console.error("Gemini Fetch Error:", error);
-      return `Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]`;
+      return `Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT] (Error: ${error.message})`;
     }
   }
   
-  return `Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT]`;
+  return `Kejap ya boss, line sistem tengah sangkut jap. I check manual jap ya. [NEEDS_AGENT] (Attempts exhausted. Last Error: ${lastError?.message})`;
 }
 
 async function sendWhatsAppImage(to: string, imageUrl: string) {
