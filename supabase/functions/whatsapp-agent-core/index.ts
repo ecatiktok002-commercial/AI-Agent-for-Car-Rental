@@ -811,7 +811,7 @@ serve(async (req) => {
                   ? keywordSettings.value.split(',').map((k: string) => k.trim().toLowerCase()).filter((k: string) => k.length > 0)
                   : [];
 
-                const aiResponse = await generateAIResponse(text, customerName, from, ticket.id, personaInstructions, agentName, history?.reverse().slice(0, -1), referenceSnippets);
+                const aiResponse = await generateAIResponse(text, customerName, from, ticket.id, personaInstructions, agentName, history?.reverse().slice(0, -1), referenceSnippets, isRepeatCustomer, pastIcUrl, pastLicenseUrl);
                 
                 // Check for handover intent or AI-triggered escalation
                 const defaultKeywords = ["human", "agent", "person", "staff", "speak to someone", "talk to someone", "orang", "staf", "admin", "bantuan"];
@@ -922,7 +922,7 @@ async function sendWhatsAppMessage(to: string, text: string) {
 }
 
 // Helper: Generate AI Response using Gemini
-async function generateAIResponse(userInput: string, customerName: string, customerPhone: string, ticketId: string, customPersona?: string, agentName?: string, history: any[] = [], referenceSnippets?: string) {
+async function generateAIResponse(userInput: string, customerName: string, customerPhone: string, ticketId: string, customPersona?: string, agentName?: string, history: any[] = [], referenceSnippets?: string, isRepeatCustomer: boolean = false, pastIcUrl?: string | null, pastLicenseUrl?: string | null) {
   let currentKey = GEMINI_API_KEY || '';
   let attempts = 0;
   const maxAttempts = GEMINI_BACKUP_KEY ? 2 : 1;
@@ -957,7 +957,7 @@ ${formattedFacts}`;
 
       // Helper function to automatically switch models on failure
       const callGeminiWithFallback = async (requestParams: any) => {
-        const models = ["gemini-2.5-flash", "gemini-1.5-flash"];
+        const models = ["gemini-2.0-flash", "gemini-1.5-flash"];
         for (let i = 0; i < models.length; i++) {
           try {
             return await ai.models.generateContent({
@@ -1329,8 +1329,8 @@ TOOL & AVAILABILITY RULES:
                 pickup_time: args.pickup_time,
                 price: args.price,
                 duration: args.duration,
-                ic_url: args.ic_url || pastIcUrl || 'Repeat Customer - On File',
-                license_url: args.license_url || pastLicenseUrl || 'Repeat Customer - On File',
+                ic_url: args.ic_url || pastIcUrl || (isRepeatCustomer ? 'Repeat Customer - On File' : null),
+                license_url: args.license_url || pastLicenseUrl || (isRepeatCustomer ? 'Repeat Customer - On File' : null),
                 receipt_url: args.receipt_url,
                 status: 'Pending'
               };
@@ -1443,7 +1443,7 @@ TOOL & AVAILABILITY RULES:
               temperature: 0.7,
               topK: 40,
               topP: 0.95,
-              tools: [{ functionDeclarations: [getCarAvailabilityDeclaration, getAllCarsDeclaration, saveBookingLeadDeclaration, requestHumanApprovalDeclaration] }],
+              tools: [{ functionDeclarations: activeTools }],
             }
           });
         } else {
