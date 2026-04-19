@@ -614,22 +614,43 @@ serve(async (req) => {
                 let assignedAgentId = null;
 
                 if (activeAgents && activeAgents.length > 0) {
-                  // 2. Find the last assigned ticket to determine the next agent
-                  const { data: lastTicket } = await supabase
+                  // PRIORITY: Keep the same AI Persona for repeat customers
+                  const { data: customerPastTicket } = await supabase
                     .from("tickets")
                     .select("assigned_agent_id")
+                    .eq("customer_id", customer.id)
                     .not("assigned_agent_id", "is", null)
                     .order("created_at", { ascending: false })
                     .limit(1)
-                    .single();
+                    .maybeSingle();
 
-                  if (lastTicket && lastTicket.assigned_agent_id) {
-                    const lastAgentIndex = activeAgents.findIndex(a => a.id === lastTicket.assigned_agent_id);
-                    const nextAgentIndex = lastAgentIndex !== -1 ? (lastAgentIndex + 1) % activeAgents.length : 0;
-                    assignedAgentId = activeAgents[nextAgentIndex].id;
-                  } else {
-                    // If no previous ticket, assign to the first agent
-                    assignedAgentId = activeAgents[0].id;
+                  if (customerPastTicket && customerPastTicket.assigned_agent_id) {
+                    // Check if their previous agent is still online/active
+                    const isStillActive = activeAgents.some(a => a.id === customerPastTicket.assigned_agent_id);
+                    if (isStillActive) {
+                      assignedAgentId = customerPastTicket.assigned_agent_id;
+                      console.log(`Retaining previous agent ${assignedAgentId} for returning customer ${customer.id}`);
+                    }
+                  }
+
+                  // FALLBACK: Global Round-Robin strictly for NEW customers
+                  if (!assignedAgentId) {
+                    const { data: lastTicket } = await supabase
+                      .from("tickets")
+                      .select("assigned_agent_id")
+                      .not("assigned_agent_id", "is", null)
+                      .order("created_at", { ascending: false })
+                      .limit(1)
+                      .maybeSingle();
+
+                    if (lastTicket && lastTicket.assigned_agent_id) {
+                      const lastAgentIndex = activeAgents.findIndex(a => a.id === lastTicket.assigned_agent_id);
+                      const nextAgentIndex = lastAgentIndex !== -1 ? (lastAgentIndex + 1) % activeAgents.length : 0;
+                      assignedAgentId = activeAgents[nextAgentIndex].id;
+                    } else {
+                      // If no previous ticket, assign to the first agent
+                      assignedAgentId = activeAgents[0].id;
+                    }
                   }
                 }
 
@@ -756,7 +777,11 @@ serve(async (req) => {
                   isRepeatCustomer = true;
                   pastIcUrl = pastBookings[0].ic_url;
                   pastLicenseUrl = pastBookings[0].license_url;
-                  personaInstructions += `\n\n[CRITICAL RETENTION RULE] This is a returning customer who previously completed a car rental with us! YOU MUST welcome them back warmly (e.g., "Welcome back boss! / Hai boss, kembali lagi!"). Because their documentation is already in our system, do NOT ask them to upload their IC or Driver's License again. Just ask them what car they want to rent this time and confirm the dates/times.`;
+                  personaInstructions += `\n\n[CRITICAL RETENTION RULE] This is a returning customer who previously completed a car rental with us! 
+1. YOU MUST welcome them back warmly (e.g., "Welcome back boss! / Hai boss, kembali lagi!").
+2. Because their documentation is already in our system, do NOT ask them to upload their IC or Driver's License again. 
+3. Just ask them what car they want to rent this time and confirm the dates/times.
+4. Once they confirm the car and dates, immediately provide them with the Payment Method / Banking Details and wait for them to upload the Payment Receipt. Do not hold them up.`;
                 }
 
                 // Fetch customer's all tickets to grab full historical context
@@ -1107,22 +1132,22 @@ BOOKING WORKFLOW RULE:
       Pickup Time: [Time]
       Price: [Price/day]
       Duration: [Number] days
-   b. In the SAME message, instruct the customer to make the payment and upload 3 items: IC, Driving License, and Payment Receipt. You MUST include the exact text "[SEND_QR]" so the system attaches the QR code.
+   b. In the SAME message, instruct the customer to make the payment and upload 3 items: IC, Driving License, and Payment Receipt. (Unless they are a Repeat Customer, then ONLY ask for the Payment Receipt). You MUST include the exact text "[SEND_QR]" so the system attaches the QR code.
 3. Wait for the customer to upload the documents. (Documents will appear in your prompt as [UPLOADED_IMAGE: url] or [UPLOADED_DOCUMENT: url]).
 
 DOCUMENT VALIDATION RULES:
 When the customer uploads images, you must act as a strict validator. Check EVERY uploaded image.
 - RECEIPT: You MUST extract the date and amount from the receipt image. Compare the receipt date to Today's date (${todayDate}). If the date on the receipt is NOT exactly ${todayDate}, or if the amount is NOT RM100, you MUST reject it. Reply: "Sorry boss, resit ni macam tak jelas/tak betul. Boleh tolong hantar gambar resit penuh yang nampak tarikh hari ni (${todayDate}) dan amount RM100 tak? 🙏"
-- IC: Look closely for the exact text "MyKad". If the text "MyKad" is not clearly visible, reject it. Reply: "Sorry boss, gambar IC ni macam tak jelas la. Boleh tolong hantar gambar MyKad yang nampak jelas tak? 🙏"
-- LICENSE: Look for the exact text "Lesen Memandu" or "Driving License". If neither is visible, reject it. Reply: "Boss, gambar lesen ni macam bukan lesen memandu la. Boleh tolong hantar gambar Lesen Memandu yang nampak jelas tak? Mekasih! 🚗"
+- IC: Look closely for the exact text "MyKad". If the text "MyKad" is not clearly visible, and they are NOT a repeat customer, reject it. Reply: "Sorry boss, gambar IC ni macam tak jelas la. Boleh tolong hantar gambar MyKad yang nampak jelas tak? 🙏"
+- LICENSE: Look for the exact text "Lesen Memandu" or "Driving License". If neither is visible, and they are NOT a repeat customer, reject it. Reply: "Boss, gambar lesen ni macam bukan lesen memandu la. Boleh tolong hantar gambar Lesen Memandu yang nampak jelas tak? Mekasih! 🚗"
 - PDF: If they upload a PDF ([UPLOADED_DOCUMENT: url]), reply: "Boss, sistem I tak boleh baca file PDF/Document la buat masa ni. Boleh tolong open PDF tu, buat screenshot, lepas tu hantar sebagai gambar (photo) biasa tak? Mekasih boss! 🚗"
 
 4. COMPLETING THE BOOKING:
-Once the customer has uploaded a valid Payment Receipt (and other requested documents), you MUST immediately call the 'save_booking_lead' tool with the details from the summary. 
-Do NOT wait for the customer to say "done". If the documents are valid, call the tool.
+Once the customer has uploaded a valid Payment Receipt (and other requested documents, if required), you MUST immediately call the 'save_booking_lead' tool with the details from the summary. 
+Do NOT wait for the customer to say "done". If the required documents are valid, call the tool.
 Do NOT call 'request_human_approval' unless the customer explicitly demands to speak to a human.
 
-5. After the 'save_booking_lead' tool succeeds, reply to the customer confirming the booking is secured and that a human agent will verify the documents shortly. Reply in your assigned persona.
+5. After the 'save_booking_lead' tool succeeds, reply to the customer confirming the booking is secured and that a human agent will verify your payment shortly. Reply in your assigned persona.
 
 DOMAIN & SAFETY RULES:
 - Car Rental Only: You MUST ONLY answer enquiries or questions related to Car Rentals. If asked about other unrelated topics, politely decline and steer the conversation back to car rentals.
